@@ -223,3 +223,52 @@ async def test_webhook(payload: WebhookPayload, _=Depends(require("system", "man
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "测试消息发送失败，请检查地址与网络")
     return {"ok": True}
+
+
+# --------------------------------------------------------------------- addresses
+class AddressesIn(BaseModel):
+    panel_url: str | None = Field(default=None, max_length=300)
+    mcp_mode: str | None = Field(default=None, max_length=16)
+    mcp_host: str | None = Field(default=None, max_length=120)
+    mcp_port: int | None = Field(default=None, ge=1024, le=65535)
+
+
+@router.get("/system/addresses")
+async def get_addresses(request: Request, session: SessionDep, _=Depends(require("system", "read"))) -> dict:
+    from .. import addresses as addr
+
+    return addr.public(await addr.load(session), request)
+
+
+@router.put("/system/addresses")
+async def put_addresses(
+    payload: AddressesIn,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("system", "manage")),
+) -> dict:
+    from .. import addresses as addr
+
+    current = await addr.load(session)
+    data = payload.model_dump(exclude_none=True)
+    for key, value in data.items():
+        setattr(current, key, value)
+    try:
+        saved = await addr.save(session, current)
+    except addr.AddressError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await record(
+        session,
+        action="system.addresses",
+        actor=actor,
+        target=saved.panel_url or "（自动推断）",
+        detail=asdict_addr(saved),
+        ip=client_ip(request),
+    )
+    return addr.public(saved, request)
+
+
+def asdict_addr(cfg) -> dict:
+    from dataclasses import asdict
+
+    return asdict(cfg)

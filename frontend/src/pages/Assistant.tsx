@@ -215,6 +215,22 @@ export function AssistantPage() {
     setBubbles([]);
   };
 
+  if (config.isError) {
+    return (
+      <Alert color="red" variant="light" title="无法读取 AI 配置" icon={<IconAlertTriangle size={16} />}>
+        <Stack gap={6}>
+          <Text fz={12}>{config.error instanceof ApiError ? config.error.detail : "请求 AI 配置失败"}</Text>
+          <Text fz={11} c="dimmed">
+            如果提示接口不存在，说明面板进程还是旧版本——重新运行启动脚本（或重启面板）加载新代码后再试。
+          </Text>
+          <Button size="compact-xs" variant="default" onClick={() => config.refetch()} leftSection={<IconRefresh size={12} />}>
+            重试
+          </Button>
+        </Stack>
+      </Alert>
+    );
+  }
+
   if (config.isLoading) {
     return (
       <Group justify="center" p="xl">

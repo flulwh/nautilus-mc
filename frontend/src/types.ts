@@ -24,6 +24,7 @@ export interface Server {
   memory_mb: number;
   min_memory_mb: number;
   port: number;
+  public_address: string;
   rcon_port: number;
   rcon_enabled: boolean;
   jvm_args: string;
@@ -203,4 +204,15 @@ export interface AiTool {
   dangerous: boolean;
   mutates: boolean;
   perm: string;
+}
+
+export interface AddressConfig {
+  panel_url: string;
+  mcp_mode: "stdio" | "http";
+  mcp_host: string;
+  mcp_port: number;
+  effective_panel_url: string;
+  inferred: boolean;
+  mcp_exposed: boolean;
+  mcp_client_example: string;
 }

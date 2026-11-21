@@ -98,14 +98,33 @@ def build_server() -> MCPServer:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nautilus.mcp_server", description="Nautilus MCP server")
-    parser.add_argument("--http", type=int, metavar="PORT", help="用 streamable-http 监听该端口，默认走 stdio")
-    parser.add_argument("--host", default="127.0.0.1", help="HTTP 监听地址（默认只监听本机）")
+    parser.add_argument("--http", type=int, metavar="PORT", help="用 streamable-http 监听该端口（覆盖配置）")
+    parser.add_argument("--stdio", action="store_true", help="强制走 stdio（覆盖配置）")
+    parser.add_argument("--host", help="HTTP 监听地址；默认读系统设置里的 MCP 地址（初始 127.0.0.1）")
     args = parser.parse_args(argv)
 
+    from .addresses import resolve_for_mcp
+
+    try:
+        configured = resolve_for_mcp()
+    except Exception as exc:  # noqa: BLE001 - 配置读不到就退回安全默认，不让 MCP 起不来
+        print(f"读取地址配置失败（{exc}），使用默认 127.0.0.1:8765", file=sys.stderr)
+        configured = None
+
+    host = args.host or (configured.mcp_host if configured else "127.0.0.1")
+    port = args.http or (configured.mcp_port if configured else 8765)
+    # 命令行 > 配置；配置默认 stdio，只有显式切到 http 才监听端口。
+    use_http = bool(args.http) or (not args.stdio and configured is not None and configured.mcp_mode == "http")
+
     server = build_server()
-    if args.http:
-        # 传参而不是改环境变量：run() 会把 kwargs 透给 run_streamable_http_async。
-        server.run("streamable-http", host=args.host, port=args.http)
+    if use_http:
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            print(
+                f"警告：MCP 将监听 {host}:{port}，该接口能操纵全部服务器，请确认只在可信网络内暴露。",
+                file=sys.stderr,
+            )
+        # 传参而不是改环境变量：run() 会把 kwargs 透传给 run_streamable_http_async。
+        server.run("streamable-http", host=host, port=port)
     else:
         server.run("stdio")
     return 0

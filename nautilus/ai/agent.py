@@ -39,6 +39,8 @@ INSTRUCTIONS = """你是 Nautilus 的运维助手，通过工具操纵 Minecraft
 - 「装个插件」：search_projects 找 slug -> install_project 安装 -> 提示重启。
 - 涉及玩家（op/封禁/白名单）直接用 player_action，别去改 json 文件。
 - 服务器卡死才对 server_kill；正常停止永远用 server_stop（会保存世界）。
+- 玩家问“怎么进服/服务器地址”：用 list_servers 返回的 public_address；
+  它是面板里配置的对外地址，不要拿本机 port 或 data_dir 猜。
 
 安全约束：
 - 任何不可逆操作（删世界、删插件、覆盖文件、恢复备份），执行前用一句话说明

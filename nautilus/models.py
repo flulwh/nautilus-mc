@@ -81,6 +81,9 @@ class Server(Base):
     memory_mb: Mapped[int] = mapped_column(Integer, default=2048)
     min_memory_mb: Mapped[int] = mapped_column(Integer, default=512)
     port: Mapped[int] = mapped_column(Integer, default=25565)
+    #: 玩家实际进服用的地址（可能与本机监听端口不同，例如反代/NAT）。
+    #: 空表示沿用 port，由面板按 Host 头推断。
+    public_address: Mapped[str] = mapped_column(String(255), default="")
     rcon_port: Mapped[int] = mapped_column(Integer, default=25575)
     rcon_password: Mapped[str] = mapped_column(String(64), default="")
     rcon_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -108,6 +111,7 @@ class Server(Base):
             "memory_mb": self.memory_mb,
             "min_memory_mb": self.min_memory_mb,
             "port": self.port,
+            "public_address": self.public_address,
             "rcon_port": self.rcon_port,
             "rcon_enabled": self.rcon_enabled,
             "jvm_args": self.jvm_args,

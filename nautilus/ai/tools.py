@@ -248,6 +248,7 @@ async def list_servers() -> dict[str, Any]:
                     "version": row.version,
                     "state": snap.get("state"),
                     "port": row.port,
+                    "public_address": row.public_address or f"本机:{row.port}",
                     "players_online": len(snap.get("players") or []),
                     "memory_mb": row.memory_mb,
                 }
@@ -661,15 +662,22 @@ async def run_task(task_id: int) -> dict[str, Any]:
 
 @tool(perm=("server", "read"))
 async def panel_info() -> dict[str, Any]:
-    """面板总体信息：支持的服务器类型、Java 运行时、数据目录、时间区。诊断环境问题时先看这个。"""
+    """面板总体信息：对外地址、MCP 模式、服务器类型、Java 运行时、数据目录、时间区。诊断环境与回答“怎么连服”先看这个。"""
+    from .. import addresses as addr
+
     runtimes = []
-    for item in java_service.detect():
+    for item in await java_service.detect():
         runtimes.append({"major": item.major, "version": item.version, "vendor": item.vendor, "path": str(item.path)})
-    kinds = [{"kind": key, "label": value} for key, value in provision.KINDS.items()]
+    kinds = [{"kind": key, "label": key} for key in provision.KINDS]
+    async with session_scope() as s:
+        address_cfg = await addr.load(s)
     return {
         "kinds": kinds,
         "java": runtimes,
         "data_dir": str(settings.data_dir.resolve()),
         "timezone": settings.timezone,
         "servers_dir": str(settings.servers_dir),
+        "panel_url": address_cfg.panel_url or "（未配置，按访问 Host 推断）",
+        "mcp_mode": address_cfg.mcp_mode,
+        "mcp_address": f"{address_cfg.mcp_host}:{address_cfg.mcp_port}",
     }

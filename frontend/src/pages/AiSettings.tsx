@@ -65,6 +65,24 @@ export function AiSettings({ canManage }: { canManage: boolean }) {
     onError: (exc) => notifications.show({ color: "red", message: errText(exc) }),
   });
 
+  if (config.isError) {
+    return (
+      <Card className="glass" p="md" withBorder>
+        <Group justify="space-between">
+          <Text fz={11.5} c="red">
+            读取 AI 配置失败：{errText(config.error)}
+          </Text>
+          <Button size="compact-xs" variant="default" onClick={() => config.refetch()}>
+            重试
+          </Button>
+        </Group>
+        <Text fz={10.5} c="dimmed" mt={6}>
+          若提示接口不存在，说明面板进程还是旧版本，重启面板后再试。
+        </Text>
+      </Card>
+    );
+  }
+
   if (!form) {
     return (
       <Card className="glass" p="md" withBorder>

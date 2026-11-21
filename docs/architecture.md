@@ -66,6 +66,7 @@
 | 通知 | `notify.py` | Webhook 投递（Discord embed / 扁平 JSON）、事件订阅、频率抑制 | `notify.emit(event, ...)` |
 | 定时 | `servers/tasks.py` | APScheduler cron 维护任务（重启/备份/指令） | `run_task(id)` |
 | 审计 | `audit.py` | 所有写操作的不可变记录 | `audit.record(...)` |
+| 地址配置 | `addresses.py` | 面板对外地址（Host 推断兜底）、MCP 传输模式/监听地址，存 `settings_kv` | `load/save/public` |
 | AI 配置 | `ai/config.py` | 端点/模型/密钥配置，Fernet 加密后存 `settings_kv` | `load/save` |
 | AI 工具 | `ai/tools.py` | 把面板能力封装为 33 个工具：Casbin 权限、危险标记、统一返回、写审计；不依赖 pydantic-ai / FastAPI | `TOOLS / catalogue()` |
 | AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、人工审批后续跑 | `stream_turn()` |
@@ -180,9 +181,11 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | GET | `/api/servers/{id}/worlds` | `server:config` |
 | POST | `/api/servers/{id}/worlds/{name}/activate` | `server:config` |
 | GET | `/api/servers/{id}/players/stats` | `server:players` |
+| PATCH | `/api/servers/{id}`（`public_address`） | `server:config` |
 | GET/PUT | `/api/system/java` | `system:read` / `system:manage` |
 | GET/PUT | `/api/system/webhooks` | `system:read` / `system:manage` |
 | GET/POST | `/api/tokens` | 已登录（仅本人令牌） |
+| GET/PUT | `/api/system/addresses` | `system:read` / `system:manage` |
 | GET/PUT | `/api/ai/config` | `system:read` / `system:manage` |
 | POST | `/api/ai/config/test` | `system:manage` |
 | GET | `/api/ai/tools` | `system:read` |
@@ -215,10 +218,11 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | 上传 | 大小上限 + 扩展名白名单 + 覆盖需确认 |
 | 审计 | 谁、何时、从哪、做了什么、结果，全量落库，只读接口 |
 | 模型密钥 | Fernet 加密后存 `settings_kv`，密钥由 `secret_key` 派生；接口只回掩码，换密钥后旧密文失效而非崩溃 |
+| 地址注入 | 面板地址留空时按 `Host`/`X-Forwarded-Proto` 推断；MC 进服地址由每台服务器的 `public_address` 提供，AI 不猜端口 |
 | AI 越权 | 每个工具声明 `(obj, act)`，执行前以**当前用户角色**过 Casbin；AI 永远不会比调用者权限大 |
 | 危险操作 | 删除/覆盖/强杀等工具标记 `dangerous`，未开自动确认时用 `DeferredToolRequests` 停下来等人点头，按 `call_id` 绑定结果 |
 | 上下文膨胀 | 单个工具返回上限 24k 字符；模型往返步数上限 `max_steps`（1~40） |
-| MCP 暴露 | 复用同一批工具与审计；默认 stdio，`--http` 时只监听 127.0.0.1，身份由启动环境变量决定 |
+| MCP 暴露 | 复用同一批工具与审计；默认 stdio，配置切 http 时只监听 127.0.0.1；绑非本机地址会告警，身份由启动环境变量决定 |
 
 ## 8. 部署形态
 

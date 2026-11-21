@@ -28,6 +28,7 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
     memory_mb: server.memory_mb,
     min_memory_mb: server.min_memory_mb,
     port: server.port,
+    public_address: server.public_address,
     rcon_port: server.rcon_port,
     java: server.java,
     jvm_args: server.jvm_args,
@@ -44,6 +45,7 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
       memory_mb: server.memory_mb,
       min_memory_mb: server.min_memory_mb,
       port: server.port,
+      public_address: server.public_address,
       rcon_port: server.rcon_port,
       java: server.java,
       jvm_args: server.jvm_args,
@@ -122,6 +124,13 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
                 step={256}
               />
             </Group>
+            <TextInput
+              label="玩家连接地址"
+              description="对外进服地址，如 mc.example.com:25565；留空则用本机游戏端口。AI 助手回答“怎么进服”时会读这里"
+              placeholder="留空 = 本机:25565"
+              value={form.public_address}
+              onChange={(e) => setForm((f) => ({ ...f, public_address: e.currentTarget.value }))}
+            />
             <Group grow>
               <NumberInput
                 label="游戏端口"

@@ -159,18 +159,22 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 - **也能被外部 agent 驱动**：`python -m nautilus.mcp_server` 起一个 MCP server，把同一批工具
   暴露给 Claude Desktop / Cursor 等 —— 与面板内置对话共享权限模型与审计。
 
-```bash
-# 外部 MCP 客户端配置（stdio）
-{
-  "mcpServers": {
-    "nautilus": {
-      "command": "C:/path/to/nautilus-mc/.venv/Scripts/python.exe",
-      "args": ["-m", "nautilus.mcp_server"],
-      "env": {"NAUTILUS_DATA_DIR": "C:/path/to/nautilus-mc/data"}
-    }
-  }
-}
-```
+### 13. 地址配置
+
+系统设置页的「地址配置」统一管理四类地址，都不需要改代码或环境变量：
+
+| 地址 | 填在哪 | 用途 |
+|---|---|---|
+| 面板对外地址 | 系统设置 → 地址配置 | 生成可分享的链接、MCP 说明；留空则按访问请求的 Host 自动推断 |
+| AI 模型端点 | 系统设置 → AI 助手 | `base_url`，任意 OpenAI 兼容服务；已支持自填任意地址 |
+| MC 进服地址 | 服务器 → 设置 → 玩家连接地址 | 如 `mc.example.com:25565`；AI 回答「怎么进服」时读这里，不再是本机端口 |
+| MCP 地址 | 系统设置 → 地址配置 | 传输模式（stdio / http）、监听地址与端口，页面直接给出可复制的客户端配置片段 |
+
+MCP 默认 stdio（由客户端拉起，最安全）；切到 http 后常驻监听，默认只绑 `127.0.0.1`。
+改成 `0.0.0.0` 等于把「能操纵全部服务器」的接口开到局域网，界面会给出警告，请务必配合防火墙/反代。
+命令行 `--http` / `--host` / `--stdio` 可临时覆盖配置。
+
+旧版本面板没有这些接口：如果界面显示「接口不存在」或一直停在「读取中」，重启面板加载新代码即可。
 
 API Key 用 Fernet 加密后存库（密钥由 `NAUTILUS_SECRET_KEY` / `<data>/.secret` 派生），
 接口只回显尾号；换过 `secret_key` 之后旧密文解不开，需要重新填一次。
@@ -362,6 +366,8 @@ GET    /api/servers/{id}/files?path=    # 沙箱目录浏览
 GET/PUT /api/servers/{id}/config/{path} # 结构化读写 + backups/restore/raw
 GET    /api/servers/{id}/plugins/search # Modrinth / Hangar 聚合搜索
 POST   /api/servers/{id}/plugins/install
+GET    /api/system/addresses            # 面板/MCP 地址；未配置时按 Host 推断
+PUT    /api/system/addresses            # 改地址，mcp_mode=stdio|http
 GET    /api/ai/config                   # 模型配置（API Key 只回显尾号）
 PUT    /api/ai/config                   # 改配置；api_key 传空串表示不修改
 POST   /api/ai/config/test              # 拿当前配置发一句 ping

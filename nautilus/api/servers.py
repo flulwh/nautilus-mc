@@ -52,6 +52,8 @@ class ServerUpdate(BaseModel):
     memory_mb: int | None = Field(default=None, ge=512, le=65536)
     min_memory_mb: int | None = Field(default=None, ge=128, le=32768)
     port: int | None = Field(default=None, ge=1024, le=65535)
+    #: 玩家进服地址，如 mc.example.com:25565；留空表示用本机 port。
+    public_address: str | None = Field(default=None, max_length=255)
     rcon_port: int | None = Field(default=None, ge=1024, le=65535)
     rcon_enabled: bool | None = None
     jvm_args: str | None = None
@@ -245,6 +247,11 @@ async def update_server(
     rt = manager.get(server_id)
     new_port = data.get("port", server.port)
     new_rcon = data.get("rcon_port", server.rcon_port)
+    if "public_address" in data and data["public_address"] is not None:
+        addr = data["public_address"].strip()
+        if addr and (" " in addr or "://" in addr or "/" in addr):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "连接地址只能是 域名:端口 或 IP:端口，不要带协议或路径")
+        data["public_address"] = addr
     if new_port == new_rcon:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "游戏端口与 RCON 端口不能相同")
     if rt.alive and (new_port != server.port or new_rcon != server.rcon_port):
