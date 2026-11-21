@@ -28,7 +28,8 @@ const KINDS = [
   { value: "purpur", label: "Purpur · Paper 分支" },
   { value: "vanilla", label: "Vanilla · 原版" },
   { value: "fabric", label: "Fabric · 模组服" },
-  { value: "forge", label: "Forge · 模组服（手动上传）" },
+  { value: "forge", label: "Forge · 模组服（自动安装）" },
+  { value: "neoforge", label: "NeoForge · 模组服（自动安装）" },
   { value: "bedrock", label: "Bedrock · 基岩版（手动上传）" },
   { value: "custom", label: "Custom · 自有 jar" },
 ];
@@ -60,7 +61,7 @@ export function Dashboard() {
   const versions = useQuery<{ versions: string[]; manual?: boolean }>({
     queryKey: ["versions", kind],
     queryFn: () => api.get(`/servers/versions/${kind}`),
-    enabled: opened && !["forge", "bedrock", "custom"].includes(kind),
+    enabled: opened && !["bedrock", "custom"].includes(kind),
     staleTime: 300_000,
     retry: false,
   });
@@ -91,7 +92,7 @@ export function Dashboard() {
         version,
         memory_mb: memory,
         eula_accepted: eula,
-        install: !!version && !["forge", "bedrock", "custom"].includes(kind),
+        install: !!version && !["bedrock", "custom"].includes(kind),
       }),
     onSuccess: (server) => {
       notifications.show({
@@ -203,7 +204,7 @@ export function Dashboard() {
             allowDeselect={false}
             size="xs"
           />
-          {["forge", "bedrock", "custom"].includes(kind) ? (
+          {["bedrock", "custom"].includes(kind) ? (
             <Text fz={11.5} c="dimmed">
               该类型没有稳定的公开分发 API，创建后在详情页手动上传 jar。
             </Text>
@@ -245,7 +246,7 @@ export function Dashboard() {
             <Button
               size="xs"
               loading={create.isPending}
-              disabled={name.trim().length < 2 || (!version && !["forge", "bedrock", "custom"].includes(kind))}
+              disabled={name.trim().length < 2 || (!version && !["bedrock", "custom"].includes(kind))}
               onClick={() => create.mutate()}
             >
               创建并安装

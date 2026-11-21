@@ -55,10 +55,17 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
     setVersion(server.version);
   }, [server]);
 
+  const java = useQuery<{ runtimes: { path: string; version: string; major: number; source: string; vendor: string }[]; default: string }>({
+    queryKey: ["java"],
+    queryFn: () => api.get("/system/java"),
+    staleTime: 60_000,
+    retry: false,
+  });
+
   const versions = useQuery<{ versions: string[]; manual?: boolean }>({
     queryKey: ["versions", server.kind],
     queryFn: () => api.get(`/servers/versions/${server.kind}`),
-    enabled: !["forge", "bedrock", "custom"].includes(server.kind),
+    enabled: !["bedrock", "custom"].includes(server.kind),
     retry: false,
     staleTime: 300_000,
   });
@@ -131,12 +138,27 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
                 max={65535}
               />
             </Group>
+            <Select
+              label="Java 运行时"
+              description="来自系统探测与面板下载；需要其他版本时在「系统设置」下载"
+              data={[
+                { value: "", label: `面板默认（${java.data?.default ?? "java"}）` },
+                ...(java.data?.runtimes ?? []).map((rt) => ({
+                  value: rt.path,
+                  label: `${rt.version} · Java ${rt.major} · ${rt.source === "managed" ? "面板下载" : rt.vendor || "系统"}`,
+                })),
+              ]}
+              value={(java.data?.runtimes ?? []).some((rt) => rt.path === form.java) ? form.java : ""}
+              onChange={(v) => setForm((f) => ({ ...f, java: v ?? "" }))}
+              searchable
+              allowDeselect={false}
+            />
             <TextInput
-              label="Java 路径"
-              description="留空使用面板默认 java"
+              label="自定义 Java 路径"
               value={form.java}
               onChange={(e) => setForm((f) => ({ ...f, java: e.currentTarget.value }))}
               placeholder="/usr/bin/java"
+              className="mono"
             />
             <TextInput
               label="JVM 参数"
@@ -188,7 +210,7 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
               当前 jar：<span className="mono">{server.jar}</span>
               {server.jar_ready ? "（已就绪）" : "（缺失）"}
             </Text>
-            {!["forge", "bedrock", "custom"].includes(server.kind) ? (
+            {!["bedrock", "custom"].includes(server.kind) ? (
               <Group align="flex-end" gap="sm">
                 <Select
                   label="版本"

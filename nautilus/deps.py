@@ -11,13 +11,47 @@ from typing import Annotated, Any, Callable
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth.backend import current_user
+from .auth import tokens
+from .auth.backend import optional_user
 from .authz import authz
 from .db import get_session
 from .models import User
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-UserDep = Annotated[User, Depends(current_user)]
+
+
+async def identity(request: Request, user: User | None = Depends(optional_user)) -> User:
+    """Authenticate a request by bearer token **or** session cookie.
+
+    Both routes end at the same ``User`` object, so every existing permission
+    guard keeps working unchanged: a token gets exactly the role of the user
+    who minted it, no more.
+    """
+    header = request.headers.get("authorization", "")
+    if header[:7].lower() == "bearer ":
+        raw = header[7:].strip()
+        if raw.startswith(tokens.PREFIX):
+            token_user = await tokens.authenticate(raw)
+            if token_user is not None:
+                return token_user
+            # An explicit credential that does not verify must not silently fall
+            # back to a cookie: that would hide an expired token behind a stale
+            # browser session and make the failure impossible to diagnose.
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "API 令牌无效或已过期",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    if user is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Unauthorized",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
+UserDep = Annotated[User, Depends(identity)]
 
 
 class Forbidden(HTTPException):

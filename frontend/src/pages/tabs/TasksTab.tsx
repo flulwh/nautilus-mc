@@ -34,6 +34,7 @@ const KIND_META: Record<string, { label: string; color: string }> = {
   restart: { label: "重启", color: "orange" },
   start: { label: "启动", color: "teal" },
   stop: { label: "停止", color: "gray" },
+  kill: { label: "强杀", color: "red" },
   backup: { label: "备份", color: "moss" },
   command: { label: "指令", color: "blue" },
 };
@@ -300,6 +301,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
                 { value: "restart", label: "重启服务器" },
                 { value: "start", label: "启动服务器" },
                 { value: "stop", label: "停止服务器" },
+                { value: "kill", label: "强制结束进程" },
                 { value: "command", label: "执行控制台指令" },
               ]}
               value={draft.kind}

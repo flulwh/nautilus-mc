@@ -157,7 +157,7 @@ export interface ScheduledTask {
   id: number;
   server_id: number;
   name: string;
-  kind: "restart" | "start" | "stop" | "backup" | "command";
+  kind: "restart" | "start" | "stop" | "kill" | "backup" | "command";
   cron: string;
   payload: string;
   enabled: boolean;

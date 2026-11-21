@@ -21,7 +21,7 @@ guard = require_any(("server", "tasks"), ("server", "config"))
 
 class TaskCreate(BaseModel):
     name: str = Field(min_length=1, max_length=60)
-    kind: str = Field(default="command", pattern="^(restart|start|stop|backup|command)$")
+    kind: str = Field(default="command", pattern="^(restart|start|stop|kill|backup|command)$")
     cron: str = Field(default="0 4 * * *", max_length=64)
     payload: str = Field(default="", max_length=1000)
     enabled: bool = True
@@ -29,7 +29,7 @@ class TaskCreate(BaseModel):
 
 class TaskUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=60)
-    kind: str | None = Field(default=None, pattern="^(restart|start|stop|backup|command)$")
+    kind: str | None = Field(default=None, pattern="^(restart|start|stop|kill|backup|command)$")
     cron: str | None = Field(default=None, max_length=64)
     payload: str | None = Field(default=None, max_length=1000)
     enabled: bool | None = None

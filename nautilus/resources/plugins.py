@@ -99,6 +99,7 @@ def loader_for(server: Server) -> str:
         "vanilla": "",
         "fabric": "fabric",
         "forge": "forge",
+        "neoforge": "neoforge",
         "bedrock": "",
         "custom": "bukkit",
     }.get(server.kind, "paper")
@@ -107,7 +108,7 @@ def loader_for(server: Server) -> str:
 def project_type_for(server: Server) -> str:
     if server.kind == "vanilla":
         return "datapack"
-    return "mod" if server.kind in {"fabric", "forge"} else "plugin"
+    return "mod" if server.kind in {"fabric", "forge", "neoforge"} else "plugin"
 
 
 def content_dir(server: Server) -> Path:
@@ -116,10 +117,14 @@ def content_dir(server: Server) -> Path:
     Vanilla has no plugin loader at all: its only server-side extension point
     is the datapack, which lives inside the world folder.
     """
-    if server.kind in {"fabric", "forge"}:
+    if server.kind in {"fabric", "forge", "neoforge"}:
         return server.directory / "mods"
     if server.kind == "vanilla":
-        return server.directory / "world" / "datapacks"
+        # Datapacks live inside the *active* world folder, which is a property
+        # (`level-name`), not always "world".
+        from .backups import level_name
+
+        return server.directory / level_name(server) / "datapacks"
     return server.directory / "plugins"
 
 

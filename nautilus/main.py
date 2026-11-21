@@ -18,7 +18,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from .api import backups, configs, files, players, plugins, servers, system, tasks
+from .api import backups, configs, files, players, plugins, servers, system, tasks, tokens, worlds
 from .auth import router as auth_router
 from .auth.backend import auth_backend, fastapi_users, get_user_manager  # noqa: F401  (re-export)
 from .authz import authz
@@ -127,6 +127,8 @@ def create_app() -> FastAPI:
     app.include_router(players.router, prefix=api_prefix)
     app.include_router(backups.router, prefix=api_prefix)
     app.include_router(tasks.router, prefix=api_prefix)
+    app.include_router(worlds.router, prefix=api_prefix)
+    app.include_router(tokens.router, prefix=api_prefix)
     app.include_router(system.router, prefix=api_prefix)
     app.include_router(system.audit_router, prefix=api_prefix)
 

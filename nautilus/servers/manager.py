@@ -374,8 +374,19 @@ class ServerManager:
                     rt.started_at = rt.started_at or time.time()
                     self._publish_state(server.id, rt)
                     log.info("server %s is ready", server.id)
+                    from .. import notify
+
+                    notify.emit("server.started", server_id=server.id, detail={"port": server.port})
                 elif parsed.event in {"join", "leave"}:
                     bus.publish(topic(server.id, "players"), {"players": sorted(rt.console.players)})
+                    if parsed.player:
+                        from .. import notify
+
+                        notify.emit(
+                            f"player.{parsed.event}",
+                            server_id=server.id,
+                            detail={"player": parsed.player, "online": len(rt.console.players)},
+                        )
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover
@@ -399,6 +410,14 @@ class ServerManager:
         self._publish_state(server.id, rt)
         bus.publish(topic(server.id, "log"), {"line": f"[nautilus] 进程退出，code={code}", "level": "warn"})
         log.info("server %s exited with %s (expected=%s)", server.id, code, rt.expected_stop)
+
+        from .. import notify
+
+        notify.emit(
+            "server.stopped" if rt.state == "stopped" else "server.crashed",
+            server_id=server.id,
+            detail={"code": code, "uptime": int(uptime)},
+        )
 
         # A run that lasted a while counts as healthy: without this the crash
         # counter is exhausted after ten crashes spread over weeks and

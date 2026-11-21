@@ -50,12 +50,15 @@
 | RCON | `servers/rcon.py` | 纯 asyncio RCON 协议实现 | `await rcon.command("list")` |
 | 日志 | `servers/logbus.py` | stdout + 文件双通道、环形缓冲、事件解析 | `logbus.subscribe(id)` |
 | 指标 | `servers/metrics.py` | psutil 采样、历史环形队列 | `metrics.history(id)` |
-| 装服 | `servers/provision.py` | Fill v3 / Purpur / Mojang / Fabric 下载 | `provision.install(...)` |
+| 装服 | `servers/provision.py` | Fill v3 / Purpur / Mojang / Fabric / Forge / NeoForge（安装器 + shim jar） | `provision.install(...)` |
+| Java | `servers/java.py` | 运行时探测、Adoptium JRE 下载/解压/校验 | `java.detect()/download()` |
 | 文件 | `api/files.py` | 目录浏览、读写、上传下载、路径沙箱 | — |
 | 配置 | `configs/` | properties / YAML / JSON / TOML 解析与原子写 | — |
 | 插件 | `resources/plugins.py` | Modrinth / Hangar 搜索、安装、哈希校验、本地扫描 | — |
 | 备份 | `resources/backups.py` | tar.gz 归档、清单、安全恢复、份数淘汰 | `create/list/restore` |
-| 玩家 | `resources/players.py` | whitelist/ops/bans 文件、UUID 解析、RCON 同步 | `lists/whitelist_add/op_add/ban_add` |
+| 玩家 | `resources/players.py` | whitelist/ops/bans 文件、UUID 解析、RCON 同步、存档统计 | `lists/whitelist_add/op_add/ban_add` |
+| 世界 | `resources/worlds.py` | 世界目录扫描、切换/新建、回收站式删除、玩法属性校验 | `list_worlds/activate/delete` |
+| 通知 | `notify.py` | Webhook 投递（Discord embed / 扁平 JSON）、事件订阅、频率抑制 | `notify.emit(event, ...)` |
 | 定时 | `servers/tasks.py` | APScheduler cron 维护任务（重启/备份/指令） | `run_task(id)` |
 | 审计 | `audit.py` | 所有写操作的不可变记录 | `audit.record(...)` |
 
@@ -124,6 +127,7 @@ policies(id, ptype, v0, v1, v2)   -- casbin: p/g 规则，可热更新
 settings_kv(key, value)
 scheduled_tasks(id, server_id, name, kind, cron, payload, enabled,
                 last_run, last_status, last_result, created_at)
+api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expires_at)
 ```
 
 `state` 为运行时字段，不落库（进程重启后从 jar 与配置重建）。
@@ -140,6 +144,12 @@ scheduled_tasks(id, server_id, name, kind, cron, payload, enabled,
 | GET | `/api/servers/{id}/files?path=` | `server:files` |
 | PUT | `/api/servers/{id}/files/content` | `server:files` |
 | GET/PUT | `/api/servers/{id}/config/{path}` | `server:config` |
+| GET | `/api/servers/{id}/worlds` | `server:config` |
+| POST | `/api/servers/{id}/worlds/{name}/activate` | `server:config` |
+| GET | `/api/servers/{id}/players/stats` | `server:players` |
+| GET/PUT | `/api/system/java` | `system:read` / `system:manage` |
+| GET/PUT | `/api/system/webhooks` | `system:read` / `system:manage` |
+| GET/POST | `/api/tokens` | 已登录（仅本人令牌） |
 | GET | `/api/servers/{id}/plugins/search?q=` | `server:plugins` |
 | POST | `/api/servers/{id}/plugins/install` | `server:plugins` |
 | GET | `/api/servers/{id}/metrics?window=300` | `server:read` |

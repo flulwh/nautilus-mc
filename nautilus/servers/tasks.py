@@ -35,6 +35,7 @@ KINDS = {
     "restart": "重启服务器",
     "start": "启动服务器",
     "stop": "停止服务器",
+    "kill": "强制结束进程",
     "backup": "创建备份",
     "command": "执行指令",
 }
@@ -186,6 +187,12 @@ async def run_task(task_id: int, *, source: str = "cron") -> dict:
         elif kind == "stop":
             await manager.stop(server)
             result = "已停止"
+        elif kind == "kill":
+            if not manager.get(server_id).alive:
+                result = "服务器未在运行"
+            else:
+                await manager.stop(server, force=True)
+                result = "已强制结束"
         elif kind == "backup":
             import asyncio
 
@@ -211,4 +218,8 @@ async def run_task(task_id: int, *, source: str = "cron") -> dict:
             topic(server_id, "task"),
             {"task_id": task_id, "name": name, "status": status, "result": result, "source": source},
         )
+        if status != "ok":
+            from .. import notify
+
+            notify.emit("task.failed", server_id=server_id, detail={"name": name, "error": result})
     return {"task_id": task_id, "status": status, "result": result}

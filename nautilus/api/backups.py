@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .. import notify
 from ..audit import record
 from ..deps import SessionDep, client_ip, require_any
 from ..events import bus, topic
@@ -89,6 +90,11 @@ async def create_backup(
                 {"stage": "完成", "pct": 100, "running": False, "archive": meta.name},
             )
             bus.publish(topic(server_id, "log"), {"line": f"[nautilus] 备份完成：{meta.name}（{meta.bytes // 1048576 or 1} MB）", "level": "info"})
+            notify.emit(
+                "backup.created",
+                server_id=server_id,
+                detail={"name": meta.name, "scope": payload.scope, "mb": meta.bytes // 1048576 or 1},
+            )
             await record(
                 None,
                 action="backup.create",
@@ -165,6 +171,7 @@ async def restore_backup(
         detail={"replaced": result.get("replaced", [])},
         ip=client_ip(request),
     )
+    notify.emit("backup.restored", server_id=server_id, detail={"name": name})
     return result
 
 

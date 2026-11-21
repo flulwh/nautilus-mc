@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import sys
 import time
 from pathlib import Path
-from functools import partial
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -65,14 +63,20 @@ async def main() -> int:
             _print(f"      server id={sid} port={port}")
 
             _print("[2/6] waiting for the jar download ...")
-            jar = DATA / "servers" / str(sid) / "server.jar"
+            # The installed jar keeps its upstream file name (e.g.
+            # ``vanilla-1.20.4.jar``) rather than a fixed ``server.jar``, so the
+            # API is the source of truth for both the name and readiness.
+            jar: Path | None = None
             deadline = time.time() + 420
             while time.time() < deadline:
-                if jar.exists() and jar.stat().st_size > 5_000_000:
-                    break
+                info = (await c.get(f"/api/servers/{sid}")).json()
+                if info.get("jar_ready"):
+                    jar = DATA / "servers" / str(sid) / info["jar"]
+                    if jar.exists() and jar.stat().st_size > 5_000_000:
+                        break
                 await asyncio.sleep(3)
-            assert jar.exists(), "jar was not downloaded"
-            _print(f"      jar ready: {jar.stat().st_size / 1048576:.1f} MB")
+            assert jar is not None and jar.exists(), "jar was not downloaded"
+            _print(f"      jar ready: {jar.name} ({jar.stat().st_size / 1048576:.1f} MB)")
 
             _print("[3/6] starting ...")
             r = await c.post(f"/api/servers/{sid}/start")

@@ -33,6 +33,16 @@ import type { PlayerLists } from "../../types";
 
 type Pending = { type: "ban" | "kick"; name: string } | null;
 
+interface StatsRow {
+  uuid: string;
+  name: string;
+  play_seconds: number;
+  deaths: number;
+  mob_kills: number;
+  player_kills: number;
+  last_seen: number;
+}
+
 function isOnline(state: string): boolean {
   return state === "running" || state === "starting";
 }
@@ -47,6 +57,12 @@ export function PlayersTab({ serverId }: { serverId: number }) {
     queryKey: ["players", serverId],
     queryFn: () => api.get<PlayerLists>(`/servers/${serverId}/players`),
     refetchInterval: 8000,
+  });
+
+  const stats = useQuery<{ players: StatsRow[] }>({
+    queryKey: ["player-stats", serverId],
+    queryFn: () => api.get(`/servers/${serverId}/players/stats`),
+    refetchInterval: 30000,
   });
 
   const apply = (data: Partial<PlayerLists> & { applied?: boolean }) => {
@@ -367,6 +383,74 @@ export function PlayersTab({ serverId }: { serverId: number }) {
             </ScrollArea>
           </Card>
         </Stack>
+      </Grid.Col>
+
+      <Grid.Col span={12}>
+        <Card className="glass" p="md" withBorder>
+          <Group justify="space-between" mb={6}>
+            <Title order={4}>游戏统计</Title>
+            <Text fz={10.5} c="dimmed">
+              来自世界存档的 stats，最后一次保存为准
+            </Text>
+          </Group>
+          <Table verticalSpacing="xs">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>玩家</Table.Th>
+                <Table.Th>游戏时长</Table.Th>
+                <Table.Th>死亡</Table.Th>
+                <Table.Th>怪物击杀</Table.Th>
+                <Table.Th>玩家击杀</Table.Th>
+                <Table.Th>最后在线</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {(stats.data?.players ?? []).slice(0, 20).map((row) => (
+                <Table.Tr key={row.uuid}>
+                  <Table.Td>
+                    <Text fz={12} className="mono">
+                      {row.name}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text fz={11.5} c="dimmed">
+                      {Math.floor(row.play_seconds / 3600)}h {Math.floor((row.play_seconds % 3600) / 60)}m
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text fz={11.5} c="dimmed">
+                      {row.deaths}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text fz={11.5} c="dimmed">
+                      {row.mob_kills}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text fz={11.5} c="dimmed">
+                      {row.player_kills}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text fz={11} c="dimmed">
+                      {row.last_seen ? new Date(row.last_seen * 1000).toLocaleDateString() : "—"}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+              {!stats.data?.players.length && (
+                <Table.Tr>
+                  <Table.Td colSpan={6}>
+                    <Text fz={11.5} c="dimmed">
+                      还没有玩家存档。玩家进服并触发一次保存后这里会有数据。
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
+            </Table.Tbody>
+          </Table>
+        </Card>
       </Grid.Col>
 
       <Modal

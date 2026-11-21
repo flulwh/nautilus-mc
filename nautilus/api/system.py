@@ -3,19 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import platform
 import subprocess
 import sys
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from .. import notify
+from ..audit import record
 from ..authz import ACTIONS, OBJECTS, ROLES, authz
-from ..deps import SessionDep, require
+from ..deps import SessionDep, client_ip, require, require_any
+from ..events import bus
 from ..extensions import pm
 from ..models import iso_utc, AuditLog, Server, User
+from ..servers import java as java_svc
+from ..servers import provision
 from ..settings import settings
+
+log = logging.getLogger("nautilus.api.system")
 
 router = APIRouter(tags=["system"])
 audit_router = APIRouter(prefix="/audit", tags=["audit"])
@@ -75,7 +84,7 @@ async def meta() -> dict:
             "max_log_lines": settings.max_log_lines,
             "metrics_interval": settings.metrics_interval,
         },
-        "server_kinds": ["paper", "purpur", "vanilla", "fabric", "forge", "bedrock", "custom"],
+        "server_kinds": provision.KINDS,
     }
 
 
@@ -102,3 +111,115 @@ def java_version() -> str:
         return (out.stderr or out.stdout).splitlines()[0].strip()
     except (OSError, subprocess.SubprocessError, IndexError):
         return "未检测到 Java"
+
+
+# ------------------------------------------------------------------ java runtime
+
+_java_tasks: dict[int, asyncio.Task] = {}
+
+
+@router.get("/system/java")
+async def list_java(_=Depends(require_any(("system", "read"), ("server", "config")))) -> dict:
+    runtimes = await java_svc.detect(refresh=True)
+    return {
+        "runtimes": [r.public() for r in runtimes],
+        "majors": java_svc.MAJORS,
+        "default": settings.java,
+        "managed_dir": str(java_svc.managed_root()),
+        "downloading": sorted(_java_tasks),
+    }
+
+
+@router.post("/system/java/{major}", status_code=202)
+async def install_java(major: int, _=Depends(require("system", "manage"))) -> dict:
+    if major not in java_svc.MAJORS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"仅支持 {', '.join(map(str, java_svc.MAJORS))}")
+    running = _java_tasks.get(major)
+    if running is not None and not running.done():
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Java {major} 正在下载")
+
+    async def run() -> None:
+        def progress(done: int, total: int, stage: str) -> None:
+            bus.publish(
+                "system:java",
+                {
+                    "major": major,
+                    "pct": int(done * 100 / total) if total else 0,
+                    "stage": stage,
+                    "done": done,
+                    "total": total,
+                },
+            )
+
+        try:
+            info = await java_svc.download(major, progress)
+            bus.publish("system:java", {"major": major, "pct": 100, "stage": f"完成 {info.version}", "done": 1, "total": 1})
+        except Exception as exc:  # noqa: BLE001 - surfaced in the UI
+            log.warning("java %s download failed: %s", major, exc)
+            bus.publish("system:java", {"major": major, "pct": -1, "stage": str(exc)})
+        finally:
+            _java_tasks.pop(major, None)
+
+    _java_tasks[major] = asyncio.create_task(run(), name=f"java-{major}")
+    return {"started": True, "major": major}
+
+
+@router.delete("/system/java", status_code=204)
+async def delete_java(path: str = Query(min_length=4), _=Depends(require("system", "manage"))) -> None:
+    try:
+        await asyncio.to_thread(java_svc.remove, path)
+    except java_svc.JavaError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+# -------------------------------------------------------------------- webhooks
+
+
+class WebhookPayload(BaseModel):
+    name: str = Field(default="webhook", max_length=60)
+    url: str = Field(min_length=8, max_length=500)
+    enabled: bool = True
+    events: list[str] = Field(default_factory=lambda: ["*"])
+    format: str = "auto"
+
+
+class WebhookList(BaseModel):
+    webhooks: list[WebhookPayload] = Field(default_factory=list)
+
+
+@router.get("/system/webhooks")
+async def get_webhooks(_=Depends(require("system", "read"))) -> dict:
+    return {"webhooks": await notify.load(), "events": notify.EVENTS}
+
+
+@router.put("/system/webhooks")
+async def put_webhooks(
+    payload: WebhookList,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("system", "manage")),
+) -> dict:
+    items = []
+    for hook in payload.webhooks:
+        if not hook.url.startswith(("http://", "https://")):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Webhook 必须是 http(s) 地址")
+        items.append(hook.model_dump())
+    saved = await notify.save(items)
+    await record(
+        session,
+        action="system.webhooks",
+        actor=actor,
+        target=f"{len(saved)} 个渠道",
+        detail={"events": sorted({e for h in saved for e in h["events"]})},
+        ip=client_ip(request),
+    )
+    return {"webhooks": saved, "events": notify.EVENTS}
+
+
+@router.post("/system/webhooks/test")
+async def test_webhook(payload: WebhookPayload, _=Depends(require("system", "manage"))) -> dict:
+    hook = {"name": payload.name, "url": payload.url, "format": payload.format, "events": payload.events, "enabled": True}
+    ok = await notify.test(hook)
+    if not ok:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "测试消息发送失败，请检查地址与网络")
+    return {"ok": True}

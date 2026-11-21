@@ -56,10 +56,15 @@
 | Paper | PaperMC **Fill v3** API | v2 已下线，代码只走 v3 |
 | Purpur | Purpur v2 API | |
 | Vanilla（原版） | Mojang piston-meta | 官方只发布 **SHA-1**，校验按 SHA-1 走 |
-| Fabric / Forge* | Fabric Meta | 安装器启动后再拉取 loader |
+| Fabric / Quilt | Fabric Meta | loader 版本自动取 stable |
+| Forge | Forge promotions + maven 安装器 | 面板执行 `--installServer`，自动识别 shim jar |
+| NeoForge | NeoForge maven 元数据 + 安装器 | 同上，版本号自动映射到 Minecraft 版本 |
 | 基岩版 / 自定义 jar | 手动上传 | `POST /api/servers/{id}/jar` |
 
-\* Forge 走"上传安装器 + 手动执行"的安全路径，面板不会替你执行任意 jar。
+Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/itzg/mc-image-helper) 的
+`ForgeLikeInstaller` 一致：下载官方安装器 → `java -jar <installer> --installServer` →
+在 `libraries/` 里解析依赖并生成 `forge-*-shim.jar`，面板把该 shim 记作启动 jar，因此 stdin / RCON /
+停止阶梯对所有服务端类型保持同一套逻辑。
 
 ---
 
@@ -69,7 +74,9 @@
 - `asyncio.create_subprocess_exec` + 流式读取 stdout/stderr，逐行解析就绪信号（`Done (x.xxxs)!`）与玩家进出。
 - **优雅停止阶梯**（移植自 [`itzg/mc-server-runner`](https://github.com/itzg/mc-server-runner)）：
   RCON `stop` → stdin `stop` → `SIGTERM`/Windows `CTRL_BREAK` → 宽限期后强杀；Windows 用 `taskkill /F /T` 连带结束进程树。
-- 崩溃自动重启：指数退避（2/4/8…最多 60s，上限 10 次），手动停止不会触发。
+- 崩溃自动重启：指数退避（2/4/8…最多 60s，上限 10 次），手动停止不会触发；健康运行 5 分钟后计数归零。
+- **Java 运行时管理**：探测 `PATH` / `JAVA_HOME` / 面板下载目录，按服务端版本要求从 Adoptium
+  （Eclipse Temurin）下载 JRE 8/11/17/21/25，校验 SHA-256 后解压到 `data/jre/<major>-<version>`。
 - **进程树聚合**：Windows 上 `java.exe` 只是启动器，真正的 JVM 在子进程里，因此 CPU/RSS 按 `psutil` 进程树累加，
   CPU% 由累计 CPU 时间差分得出（单核满载 = 100%，多核可超过 100%，与 `top` 语义一致）。
 
@@ -93,7 +100,7 @@
 ### 5. 插件与配置
 - 插件源：[Modrinth API v2](https://docs.modrinth.com/)（提供 SHA-1/SHA-512）与 [Hangar v1](https://hangar.papermc.io/)。
   **下载源不给哈希就拒绝安装**（防投毒）。按服务端类型自动换算内容目录与筛选条件：
-  Paper/Purpur → `plugins/`，Fabric/Forge → `mods/`，原版 → `world/datapacks/`（原版没有插件加载器，只有数据包）。
+  Paper/Purpur → `plugins/`，Fabric/Forge/NeoForge → `mods/`，原版 → `<世界>/datapacks/`（原版没有插件加载器，只有数据包）。
 - 配置编辑器：`server.properties`（jproperties）、`*.yml`（ruamel.yaml 保留注释）、`*.toml`（tomlkit）、`*.json`。
   写入流程恒定：**备份 → 语法校验 → 原子替换**（`os.replace`），每个文件保留最近 20 份备份在 `.nautilus/backups/`。
 
@@ -111,13 +118,28 @@
   所以离线服的条目不会和服务器自己生成的重复。
 - **写序很重要**：`whitelist add` 会让服务端把内存里的列表回写 JSON，所以顺序固定为
   `whitelist reload`（把磁盘状态读进内存）→ RCON 命令 → 面板落盘，避免面板刚加的条目被服务端的内存副本覆盖。
+- **游戏统计**：直接读 `world/stats/*.json` 与 `usercache.json`，展示每个玩家的游戏时长、死亡、击杀与最后在线，
+  不额外落库，也不会和服务器自己的统计产生偏差。
 
 ### 8. 定时任务
 - 任务存在 `scheduled_tasks` 表（Alembic 迁移），APScheduler `CronTrigger` 按面板时区解释 5 段 cron，重启后自动重建。
-- 五种动作：重启 / 启动 / 停止 / 备份 / 控制台指令；可单独启停、立即执行，执行结果（成功/失败 + 输出）持久化并显示在列表里。
+- 六种动作：重启 / 启动 / 停止 / 强制结束 / 备份 / 控制台指令；可单独启停、立即执行，执行结果（成功/失败 + 输出）持久化并显示在列表里。
 - 任务异常写入 `last_result` 而不是抛出，避免一次失败让调度器静默丢任务。
 
-### 9. 扩展
+### 9. 世界管理
+- 扫描服务器目录里所有含 `level.dat` 的目录，显示大小、维度（下界/末地）与当前使用状态；切换世界只是改
+  `server.properties` 的 `level-name`，下次启动生效。
+- 新建世界支持种子与地形类型；删除世界**移动到** `.nautilus/world-trash/`，且拒绝删除当前世界。
+- 玩法设置（难度、游戏模式、视距、模拟距离、正版验证、PVP、白名单、MOTD…）带类型与范围校验，
+  写入前自动备份 `server.properties`；所有写操作都要求服务器已停止，避免 JVM 持有区块文件时损坏存档。
+
+### 10. 系统设置
+- **通知 Webhook**：服务器启动/停止/崩溃、备份完成/恢复、任务失败、安装失败、玩家进出都可推送。
+  Discord 地址自动用 embed，其他地址收到扁平 JSON；投递在后台任务里完成，8 秒超时，失败只记日志。
+- **API 令牌**：`Authorization: Bearer nlt_…`，与应用内 Cookie 认证走同一个权限守卫，角色实时读取，
+  令牌只存 SHA-256 摘要，可设有效期并随时吊销。
+
+### 11. 扩展
 `pluggy`（pytest 的插件引擎）提供 6 个钩子：`nautilus_startup` / `nautilus_routes` / `server_starting` / `server_started` /
 `server_exited` / `console_line`。任一扩展抛异常只记日志，不会拖垮面板。
 

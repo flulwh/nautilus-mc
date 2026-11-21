@@ -8,6 +8,7 @@ server is offline.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -104,6 +105,14 @@ async def player_lists(server_id: int, session: SessionDep) -> dict:
         return _summary(server)
     except svc.PlayerError as exc:
         raise HTTPException(UNPROCESSABLE, str(exc)) from exc
+
+
+@router.get("/stats", dependencies=[Depends(guard)])
+async def player_stats(server_id: int, session: SessionDep, limit: int = Query(200, ge=1, le=1000)) -> dict:
+    """Playtime and kill counters read from the world save (no DB involved)."""
+    server = await _server(session, server_id)
+    rows = await asyncio.to_thread(svc.statistics, server, limit)
+    return {"players": rows}
 
 
 @router.get("/lookup", dependencies=[Depends(guard)])

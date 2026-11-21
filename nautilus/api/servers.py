@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from .. import notify
 from ..audit import record
 from ..db import SessionFactory
 from ..deps import SessionDep, client_ip, require
@@ -413,7 +414,7 @@ async def metrics(server_id: int, session: SessionDep, limit: int = Query(240, g
 # ---------------------------------------------------------------- provisioning
 
 
-async def _install_task(server_id: int, kind: str, version: str) -> None:
+async def _install_task(server_id: int, kind: str, version: str, loader: str = "") -> None:
     rt = manager.get(server_id)
     if rt.alive:
         bus.publish(topic(server_id, "progress"), {"task": "install", "pct": -1, "stage": "服务器正在运行，安装已取消"})
@@ -421,40 +422,47 @@ async def _install_task(server_id: int, kind: str, version: str) -> None:
     rt.install_pct = 0
     bus.publish(topic(server_id, "progress"), {"task": "install", "pct": 0, "stage": "解析下载地址"})
     try:
-        artifact = await provision.resolve(kind, version)
-        bus.publish(topic(server_id, "progress"), {"task": "install", "pct": 5, "stage": f"下载 {artifact.filename}"})
-
-        async def on_progress(done: int, total: int) -> None:
-            pct = int(done * 90 / total) + 5 if total else rt.install_pct
-            rt.install_pct = min(95, pct)
-            bus.publish(
-                topic(server_id, "progress"),
-                {"task": "install", "pct": rt.install_pct, "stage": f"{done // 1048576}MB / {total // 1048576 or '?'}MB"},
-            )
-
         async with SessionFactory() as s:
             server = await s.get(Server, server_id)
             if server is None:
                 return
-            target = server.directory / server.jar
-            await provision.download(
-                artifact.url,
-                target,
-                expected_sha256=artifact.sha256,
-                expected_sha1=artifact.sha1,
+
+            def on_line(line: str) -> None:
+                # Forge/NeoForge installers run for minutes; their output is the
+                # only progress signal the user gets, so mirror it to the console.
+                bus.publish(topic(server_id, "log"), {"line": f"[install] {line}", "level": "info"})
+
+            async def on_progress(done: int, total: int) -> None:
+                pct = int(done * 90 / total) + 5 if total else rt.install_pct
+                rt.install_pct = min(95, pct)
+                bus.publish(
+                    topic(server_id, "progress"),
+                    {"task": "install", "pct": rt.install_pct, "stage": f"{done // 1048576}MB / {total // 1048576 or '?'}MB"},
+                )
+
+            bus.publish(topic(server_id, "progress"), {"task": "install", "pct": 5, "stage": f"安装 {kind} {version}"})
+            jar = await provision.install(
+                server,
+                kind,
+                version,
+                loader=loader,
                 progress=on_progress,
+                on_line=on_line,
             )
             server.version = version
             server.kind = kind
+            server.jar = jar
             s.add(server)
             await s.commit()
         rt.install_pct = 100
         bus.publish(topic(server_id, "progress"), {"task": "install", "pct": 100, "stage": "完成"})
-        bus.publish(topic(server_id, "log"), {"line": f"[nautilus] 服务端 {artifact.filename} 安装完成", "level": "info"})
+        bus.publish(topic(server_id, "log"), {"line": f"[nautilus] 服务端 {kind} {version} 安装完成（{jar}）", "level": "info"})
     except Exception as exc:
         rt.install_pct = -1
         log.warning("install failed for server %s: %s", server_id, exc)
         bus.publish(topic(server_id, "progress"), {"task": "install", "pct": -1, "stage": str(exc)})
+        bus.publish(topic(server_id, "log"), {"line": f"[nautilus] 安装失败：{exc}", "level": "error"})
+        notify.emit("install.failed", server_id=server_id, detail={"kind": kind, "version": version, "error": str(exc)})
 
 
 @router.post("/{server_id}/install")
@@ -468,6 +476,7 @@ async def install_server(
     server = await _get(session, server_id)
     kind = payload.get("kind", server.kind)
     version = payload.get("version", server.version)
+    loader = str(payload.get("loader", "") or "")[:32]
     if not version:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请指定版本")
     if kind not in provision.KINDS:
@@ -479,10 +488,10 @@ async def install_server(
         raise HTTPException(status.HTTP_409_CONFLICT, "服务器运行中不能替换服务端 jar，请先停止服务器")
     if 0 <= rt.install_pct < 100:
         raise HTTPException(status.HTTP_409_CONFLICT, "已有安装任务在进行中")
-    task = asyncio.create_task(_install_task(server_id, kind, version))
+    task = asyncio.create_task(_install_task(server_id, kind, version, loader))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
-    await record(session, action="server.install", actor=actor, target=server.name, detail={"kind": kind, "version": version}, ip=client_ip(request))
+    await record(session, action="server.install", actor=actor, target=server.name, detail={"kind": kind, "version": version, "loader": loader}, ip=client_ip(request))
     return {"started": True, "kind": kind, "version": version}
 
 

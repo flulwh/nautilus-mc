@@ -257,3 +257,87 @@ def set_whitelist_mode(server, enabled: bool) -> None:
         server.directory / "server.properties",
         {"white-list": "true" if enabled else "false", "enforce-whitelist": "true" if enabled else "false"},
     )
+
+
+# --------------------------------------------------------------- play statistics
+
+
+def _play_ticks(payload: dict) -> int:
+    stats = payload.get("stats", {})
+    custom = stats.get("minecraft:custom", {}) if isinstance(stats, dict) else {}
+    if not isinstance(custom, dict):
+        return 0
+    # 1.17+ uses namespaced keys; older worlds used the flat "stat.*" names.
+    for key in ("minecraft:play_time", "minecraft:play_one_minute", "stat.playOneMinute"):
+        value = custom.get(key)
+        if isinstance(value, (int, float)):
+            return int(value)
+    return 0
+
+
+def _counter(payload: dict, *keys: str) -> int:
+    stats = payload.get("stats", {})
+    for group in ("minecraft:custom", "custom"):
+        bucket = stats.get(group) if isinstance(stats, dict) else None
+        if not isinstance(bucket, dict):
+            continue
+        for key in keys:
+            value = bucket.get(key)
+            if isinstance(value, (int, float)):
+                return int(value)
+    return 0
+
+
+def statistics(server, limit: int = 200) -> list[dict]:
+    """Per-player playtime / deaths / kills, straight from the world save.
+
+    ``stats/<uuid>.json`` is written by the server on every player save, so it
+    survives restarts and needs no database. Names come from ``usercache.json``;
+    when that is missing the UUID is shown instead of guessing.
+    """
+    from .backups import level_name
+
+    root = server.directory
+    names: dict[str, str] = {}
+    cache_path = root / "usercache.json"
+    if cache_path.exists():
+        try:
+            for row in json.loads(cache_path.read_text(encoding="utf-8") or "[]"):
+                if isinstance(row, dict) and row.get("uuid"):
+                    names[str(row["uuid"]).lower()] = str(row.get("name", ""))
+        except (ValueError, OSError):
+            pass
+
+    stats_dir = root / level_name(server) / "stats"
+    out: list[dict] = []
+    if not stats_dir.is_dir():
+        return out
+    for path in stats_dir.glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except (ValueError, OSError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        uid = path.stem.lower()
+        ticks = _play_ticks(payload)
+        playerdata = root / level_name(server) / "playerdata" / f"{path.stem}.dat"
+        last_seen = 0.0
+        try:
+            if playerdata.exists():
+                last_seen = playerdata.stat().st_mtime
+        except OSError:
+            pass
+        out.append(
+            {
+                "uuid": uid,
+                "name": names.get(uid, uid[:8]),
+                "play_seconds": ticks // 20,
+                "deaths": _counter(payload, "minecraft:deaths", "stat.deaths"),
+                "mob_kills": _counter(payload, "minecraft:mob_kills", "stat.mobKills"),
+                "player_kills": _counter(payload, "minecraft:player_kills", "stat.playerKills"),
+                "last_seen": last_seen,
+            }
+        )
+    out.sort(key=lambda row: row["play_seconds"], reverse=True)
+    return out[:limit]

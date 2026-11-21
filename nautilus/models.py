@@ -159,9 +159,39 @@ class PluginRecord(Base):
         }
 
 
+class ApiToken(Base):
+    """Long-lived bearer token for automation (CLI, CI, monitoring).
+
+    Only the SHA-256 of the token is stored: a leaked database must not hand
+    the attacker working credentials, exactly like a password hash. The plain
+    value is shown once, at creation time.
+    """
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(60), default="")
+    prefix: Mapped[str] = mapped_column(String(16), default="nlt")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "prefix": self.prefix,
+            "created_at": iso_utc(self.created_at),
+            "last_used_at": iso_utc(self.last_used_at),
+            "expires_at": iso_utc(self.expires_at),
+        }
+
+
 class Policy(Base):
     """Casbin policy rows (``p`` and ``g`` types)."""
-
     __tablename__ = "policies"
 
     id: Mapped[int] = mapped_column(primary_key=True)

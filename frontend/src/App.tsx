@@ -16,6 +16,7 @@ import {
 } from "@mantine/core";
 import {
   IconActivity,
+  IconAdjustments,
   IconDashboard,
   IconLogout,
   IconMoon,
@@ -33,6 +34,7 @@ import { AuditPage } from "./pages/Audit";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
 import { ServerDetail } from "./pages/ServerDetail";
+import { SystemPage } from "./pages/System";
 import { UsersPage } from "./pages/Users";
 import { hasPerm, isAdmin as isAdminUser } from "./perm";
 import type { Me } from "./types";
@@ -182,12 +184,20 @@ export function App() {
             <NavLink to="/audit" icon={<IconActivity size={14} />} label="审计日志" active={location.pathname === "/audit"} />
           )}
           {isAdmin && (
-            <NavLink
-              to="/users"
-              icon={<IconShieldLock size={14} />}
-              label="用户与角色"
-              active={location.pathname === "/users"}
-            />
+            <>
+              <NavLink
+                to="/users"
+                icon={<IconShieldLock size={14} />}
+                label="用户与角色"
+                active={location.pathname === "/users"}
+              />
+              <NavLink
+                to="/settings"
+                icon={<IconAdjustments size={14} />}
+                label="系统设置"
+                active={location.pathname === "/settings"}
+              />
+            </>
           )}
           <Box mt="auto" px={10} py={8}>
             <Anchor
@@ -213,6 +223,7 @@ export function App() {
           <Route path="/servers/:id" element={<ServerDetail />} />
           <Route path="/audit" element={canAudit ? <AuditPage /> : <Navigate to="/" replace />} />
           <Route path="/users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
+          <Route path="/settings" element={isAdmin ? <SystemPage /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell.Main>

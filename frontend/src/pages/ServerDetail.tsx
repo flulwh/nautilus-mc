@@ -27,6 +27,7 @@ import {
   IconSettings,
   IconTerminal2,
   IconUsers,
+  IconWorld,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suspense, lazy, useEffect, useState } from "react";
@@ -47,6 +48,7 @@ const BackupsTab = lazy(() => import("./tabs/BackupsTab").then((m) => ({ default
 const PlayersTab = lazy(() => import("./tabs/PlayersTab").then((m) => ({ default: m.PlayersTab })));
 const TasksTab = lazy(() => import("./tabs/TasksTab").then((m) => ({ default: m.TasksTab })));
 const SettingsTab = lazy(() => import("./tabs/SettingsTab").then((m) => ({ default: m.SettingsTab })));
+const WorldsTab = lazy(() => import("./tabs/WorldsTab").then((m) => ({ default: m.WorldsTab })));
 
 function TabFallback() {
   return (
@@ -227,6 +229,9 @@ export function ServerDetail() {
           <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={14} />}>
             插件
           </Tabs.Tab>
+          <Tabs.Tab value="worlds" leftSection={<IconWorld size={14} />}>
+            世界
+          </Tabs.Tab>
           <Tabs.Tab value="backups" leftSection={<IconArchive size={14} />}>
             备份
           </Tabs.Tab>
@@ -264,6 +269,11 @@ export function ServerDetail() {
         <Tabs.Panel value="plugins" pt="md">
           <Suspense fallback={<TabFallback />}>
               <PluginsTab serverId={serverId} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="worlds" pt="md">
+          <Suspense fallback={<TabFallback />}>
+            <WorldsTab serverId={serverId} />
           </Suspense>
         </Tabs.Panel>
         <Tabs.Panel value="backups" pt="md">
