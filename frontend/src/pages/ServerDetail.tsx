@@ -213,7 +213,7 @@ export function ServerDetail() {
       </Card>
 
       <Tabs value={tab} onChange={setTab} variant="pills" radius="md" color="abyss">
-        <Tabs.List>
+        <Tabs.List className="server-tabs">
           <Tabs.Tab value="console" leftSection={<IconTerminal2 size={14} />}>
             控制台
           </Tabs.Tab>

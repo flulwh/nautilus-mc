@@ -372,3 +372,19 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Nine server tabs do not fit on a 1024px screen: scroll them in one row
+   instead of wrapping and leaving a single orphan tab on a second line. */
+.server-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.server-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.server-tabs [role="tab"] {
+  flex: 0 0 auto;
+}
