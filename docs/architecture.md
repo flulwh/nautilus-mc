@@ -71,6 +71,7 @@
 | AI 配置 | `ai/config.py` | 端点/模型/密钥配置，Fernet 加密后存 `settings_kv` | `load/save` |
 | AI 工具 | `ai/tools.py` | 把面板能力封装为 36 个工具：Casbin 权限、危险标记、超时、统一返回、写审计；不依赖 pydantic-ai / FastAPI | `TOOLS / catalogue()` |
 | AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、审批续跑、取消、工具超时、历史压缩、失败保留消息 | `stream_turn() / build_agent()` |
+| 模型发现 | `ai/discovery.py` | `/v1/models` 拿名单，本地端点再读 `/api/tags` 补体积/参数量/量化；合并去重、限响应体、失败给可操作提示 | `discover()` |
 | AI 会话 | `ai/session.py` | 进程内多轮历史，按用户提问裁剪 + TTL/LRU | `conversations` |
 | 任务清单 | `ai/plan.py` | 按会话保存步骤与状态，模型通过 `update_plan` 更新，SSE `plan` 事件驱动前端 | `plans` |
 | 运维手册 | `ai/playbooks.py` | 6 份按需加载的 SOP；常驻上下文只留摘要 | `catalogue() / get()` |
@@ -207,6 +208,7 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | GET/PUT | `/api/system/addresses` | `system:read` / `system:manage` |
 | GET/PUT | `/api/ai/config` | `system:read` / `system:manage` |
 | POST | `/api/ai/config/test` | `system:manage` |
+| POST | `/api/ai/models` | `system:manage` |
 | GET | `/api/ai/tools` | `system:read` |
 | POST | `/api/ai/chat` | `system:read`（SSE 流式） |
 | POST | `/api/ai/approve` | `system:read` |

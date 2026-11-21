@@ -26,6 +26,23 @@ function errText(exc: unknown): string {
   return exc instanceof Error ? exc.message : String(exc);
 }
 
+interface FoundModel {
+  id: string;
+  label: string;
+  size: number | null;
+  parameter_size: string;
+  quantization: string;
+}
+
+interface ModelList {
+  ok: boolean;
+  models: FoundModel[];
+  count: number;
+  source: string;
+  error?: string;
+  hint?: string;
+}
+
 export function AiSettings({ canManage }: { canManage: boolean }) {
   const qc = useQueryClient();
   const config = useQuery<AiConfig>({
@@ -37,6 +54,8 @@ export function AiSettings({ canManage }: { canManage: boolean }) {
   const [form, setForm] = useState<AiConfig | null>(null);
   const [preset, setPreset] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
+  const [models, setModels] = useState<FoundModel[]>([]);
+  const [modelNote, setModelNote] = useState("");
 
   useEffect(() => {
     if (config.data) setForm(config.data);
@@ -51,6 +70,23 @@ export function AiSettings({ canManage }: { canManage: boolean }) {
       notifications.show({ color: "teal", message: "AI 配置已保存" });
     },
     onError: (exc) => notifications.show({ color: "red", message: errText(exc) }),
+  });
+
+  const discover = useMutation({
+    mutationFn: ({ baseUrl, key }: { baseUrl: string; key: string | undefined }) =>
+      api.post<ModelList>("/ai/models", { base_url: baseUrl, api_key: key }),
+    onSuccess: (data) => {
+      setModels(data.models);
+      setModelNote(
+        data.ok
+          ? `找到 ${data.count} 个模型（${data.source === "ollama" ? "Ollama" : "OpenAI 兼容接口"}）`
+          : `获取失败：${data.error ?? "未知错误"}${data.hint ? `。${data.hint}` : ""}`,
+      );
+    },
+    onError: (exc) => {
+      setModels([]);
+      setModelNote(`获取失败：${errText(exc)}`);
+    },
   });
 
   const test = useMutation({
@@ -98,7 +134,12 @@ export function AiSettings({ canManage }: { canManage: boolean }) {
   const applyPreset = (label: string | null) => {
     setPreset(label);
     const hit = form.presets.find((p) => p.label === label);
-    if (hit) setForm({ ...form, base_url: hit.base_url, model: hit.model });
+    if (!hit) return;
+    setForm({ ...form, base_url: hit.base_url, model: hit.model });
+    setModels([]);
+    setModelNote("");
+    // 换服务后旧密钥不能发给新地址；本地 Ollama 直接自动列一次。
+    if (label?.includes("Ollama")) discover.mutate({ baseUrl: hit.base_url, key: "" });
   };
 
   return (
@@ -149,14 +190,48 @@ export function AiSettings({ canManage }: { canManage: boolean }) {
           onChange={(e) => set("base_url", e.currentTarget.value)}
           disabled={!canManage}
         />
-        <TextInput
-          label="模型名"
-          size="xs"
-          placeholder="deepseek-chat"
-          value={form.model}
-          onChange={(e) => set("model", e.currentTarget.value)}
-          disabled={!canManage}
-        />
+        <Group gap={6} align="flex-end" wrap="nowrap">
+          <TextInput
+            label="模型名"
+            size="xs"
+            placeholder="deepseek-chat"
+            value={form.model}
+            onChange={(e) => set("model", e.currentTarget.value)}
+            disabled={!canManage}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <Button
+            size="compact-sm"
+            variant="default"
+            loading={discover.isPending}
+            disabled={!canManage || !form.base_url.trim()}
+            onClick={() =>
+              discover.mutate({
+                baseUrl: form.base_url,
+                // 已存密钥且没输入新值时沿用，否则按输入（空串=不用密钥，本地 Ollama）。
+                key: form.has_key && !apiKey.trim() ? undefined : apiKey.trim(),
+              })
+            }
+          >
+            获取模型列表
+          </Button>
+        </Group>
+        {models.length > 0 && (
+          <Select
+            size="xs"
+            placeholder={`从 ${models.length} 个已发现模型中选择`}
+            data={models.map((m) => ({ value: m.id, label: m.label }))}
+            value={models.some((m) => m.id === form.model) ? form.model : null}
+            onChange={(value) => value && set("model", value)}
+            disabled={!canManage}
+            allowDeselect={false}
+          />
+        )}
+        {modelNote && (
+          <Text fz={10.5} c={models.length ? "dimmed" : "red"} style={{ whiteSpace: "pre-wrap" }}>
+            {modelNote}
+          </Text>
+        )}
         <PasswordInput
           label="API Key"
           size="xs"
@@ -216,7 +291,7 @@ export function AiSettings({ canManage }: { canManage: boolean }) {
             variant="default"
             leftSection={<IconPlugConnected size={13} />}
             loading={test.isPending}
-            disabled={!canManage || !form.has_key}
+            disabled={!canManage || !form.model.trim()}
             onClick={() => test.mutate()}
           >
             测试连接

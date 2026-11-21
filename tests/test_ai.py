@@ -401,3 +401,175 @@ def test_agent_applies_tool_timeouts():
     assert registered["list_servers"].timeout == 60.0
     assert registered["update_config"].timeout == 120.0
     assert registered["create_backup"].timeout == 300.0
+
+
+# ------------------------------------------------------------ model discovery
+def _mock_client(handler):
+    import httpx
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_discover_ollama_merges_native_details():
+    from nautilus.ai import discovery
+
+    seen = []
+
+    def handler(request):
+        import httpx
+
+        seen.append(request.url.path)
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "qwen2.5:7b"}, {"id": "cloud-only"}]})
+        if request.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {
+                            "name": "qwen2.5:7b",
+                            "size": 4_700_000_000,
+                            "modified_at": "2026-11-01T00:00:00Z",
+                            "details": {"parameter_size": "7.2B", "quantization_level": "Q4_K_M"},
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(404, text="no")
+
+    client = _mock_client(handler)
+    try:
+        out = await discovery.discover("http://127.0.0.1:11434/v1", client=client)
+    finally:
+        await client.aclose()
+
+    assert out["ok"] is True and out["source"] == "ollama"
+    assert out["count"] == 2
+    by_id = {item["id"]: item for item in out["models"]}
+    assert by_id["qwen2.5:7b"]["parameter_size"] == "7.2B"
+    assert by_id["qwen2.5:7b"]["label"] == "qwen2.5:7b · 7.2B · Q4_K_M"
+    assert by_id["cloud-only"]["label"] == "cloud-only"
+    assert seen == ["/v1/models", "/api/tags"]
+
+
+async def test_discover_accepts_root_url_and_falls_back():
+    from nautilus.ai import discovery
+
+    seen = []
+
+    def handler(request):
+        import httpx
+
+        seen.append(request.url.path)
+        if request.url.path == "/v1/models":
+            return httpx.Response(404, text="missing")
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "llama3.2", "details": {"parameter_size": "3B"}}]})
+        return httpx.Response(404, text="no")
+
+    client = _mock_client(handler)
+    try:
+        out = await discovery.discover("http://127.0.0.1:11434", client=client)
+    finally:
+        await client.aclose()
+
+    assert out["ok"] is True and out["models"][0]["id"] == "llama3.2"
+    assert seen == ["/v1/models", "/api/tags"]
+
+
+async def test_discover_cloud_skips_native_endpoint():
+    from nautilus.ai import discovery
+
+    seen = []
+
+    def handler(request):
+        import httpx
+
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"data": [{"id": "deepseek-chat"}]})
+
+    client = _mock_client(handler)
+    try:
+        out = await discovery.discover("https://api.deepseek.com/v1", "sk-x", client=client)
+    finally:
+        await client.aclose()
+
+    assert out["ok"] is True and out["source"] == "openai-compatible"
+    assert seen == ["/v1/models"]
+
+
+async def test_discover_reports_actionable_error():
+    from nautilus.ai import discovery
+
+    def handler(request):
+        import httpx
+
+        return httpx.Response(401, text="unauthorized")
+
+    client = _mock_client(handler)
+    try:
+        out = await discovery.discover("https://api.deepseek.com/v1", client=client)
+    finally:
+        await client.aclose()
+
+    assert out["ok"] is False and out["models"] == []
+    assert "401" in out["error"] and "API Key" in out["hint"]
+
+
+async def test_discover_rejects_bad_url_and_huge_body():
+    from nautilus.ai import discovery
+
+    out = await discovery.discover("ftp://localhost:11434/v1")
+    assert out["ok"] is False and "http" in out["error"]
+
+    def handler(request):
+        import httpx
+
+        return httpx.Response(200, content=b"x" * (discovery.MAX_BYTES + 1))
+
+    client = _mock_client(handler)
+    try:
+        out = await discovery.discover("http://127.0.0.1:11434", client=client)
+    finally:
+        await client.aclose()
+    assert out["ok"] is False and "2 MB" in out["error"]
+
+
+async def test_models_endpoint_uses_unsaved_url_and_requires_manage(admin, client, monkeypatch):
+    from nautilus.ai import discovery
+
+    captured = {}
+
+    async def fake(base_url, api_key="", *, client=None):
+        captured.update({"base_url": base_url, "api_key": api_key})
+        return {"ok": True, "models": [{"id": "m1", "label": "m1"}], "count": 1, "source": "ollama"}
+
+    monkeypatch.setattr(discovery, "discover", fake)
+    r = await admin.post(
+        "/api/ai/models",
+        json={"base_url": "http://127.0.0.1:11434/v1", "api_key": ""},
+    )
+    assert r.status_code == 200, r.text
+    assert captured["base_url"] == "http://127.0.0.1:11434/v1"
+    assert captured["api_key"] == ""
+    assert r.json()["models"][0]["id"] == "m1"
+
+    # conftest 的 admin/client 是同一个客户端，先登出再验权限。
+    await client.post("/api/auth/logout")
+    r = await client.post("/api/ai/models", json={"base_url": "http://127.0.0.1:11434/v1"})
+    assert r.status_code in {401, 403}
+
+
+def test_local_endpoint_needs_no_key():
+    cfg = ai_config.AiConfig(
+        enabled=True, base_url="http://host.docker.internal:11434/v1", model="qwen2.5:7b"
+    )
+    assert ai_config.build_model(cfg) is not None
+    assert ai_config.public(cfg)["configured"] is True
+    cfg.base_url = "https://api.deepseek.com/v1"
+    try:
+        ai_config.build_model(cfg)
+    except ai_config.AiConfigError as exc:
+        assert "API Key" in str(exc)
+    else:
+        raise AssertionError("https 远端缺密钥应当报错")

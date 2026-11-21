@@ -263,3 +263,47 @@ provider 原生工具发现支持不一致，本地策略反而会引入额外�
 工具层与 Casbin 权限包装，收益不足以抵消重写风险；本项目只取可独立落地的模式。
 也没有启用工具搜索（ToolSearch）：36 个工具尚在可控范围，且国内 OpenAI 兼容端点对
 provider 原生工具发现支持不一致，本地策略反而会引入额外往返。
+
+---
+
+## 9. Ollama 模型发现（2026-11-22）
+
+用户反馈：选了 Ollama 之后还要手抄 `qwen2.5:7b` 这种模型名，容易拼错。目标是不换
+provider，直接从服务端拉取可选模型。
+
+| 上游资料 | 确认到的事实 | 落地方式 |
+|---|---|---|
+| [Ollama 官方 `/api/tags`](https://docs.ollama.com/api/tags) | `GET /api/tags` 返回 `models[]`，含 `name` / `size` / `modified_at` / `details.parameter_size` / `details.quantization_level` | 本地端点额外读它，补全参数量与量化等级 |
+| [Ollama 官方 OpenAI 兼容页](https://docs.ollama.com/openai) | `GET /v1/models` 可用；本地服务 `api_key` 必填但被忽略；`created` 是修改时间、`owned_by` 默认是 `library` | 用通用接口拿模型名单；本地服务允许空 Key，provider 侧填占位值 `ollama` |
+| Ollama 的两种 base_url 写法 | 用户可能填 `http://host:11434` 或 `http://host:11434/v1` | `endpoints()` 归一化两种写法，分别拼出 `/v1/models` 与 `/api/tags` |
+
+**实现要点**：先问通用接口，本地端点（含 `host.docker.internal`）再问原生接口；
+通用接口失败时原生接口兜底，两边结果按模型 id 合并去重，原生详情优先。
+探测只发 GET，6s 超时、响应上限 2 MB，失败原因与排查提示随 JSON 返回给前端，
+不当成 5xx。设置 `system:manage` 权限才可调，避免把内网服务信息暴露给只读用户。
+
+**取舍**：没有为 Ollama 单独接 `ollama` Python SDK —— 现有 provider 已经是 OpenAI 协议，
+再加一个 SDK 只会多一套依赖和鉴权分支；模型发现只需要两个 GET，直接走 `httpx` 更轻。
+也没有把模型列表缓存下来：本地模型随时可能 `ollama pull`，每次点按钮现取才不会选到过期名字。
+
+---
+
+## 9. Ollama 模型发现（2026-11-22）
+
+用户反馈：选了 Ollama 之后还要手抄 `qwen2.5:7b` 这种模型名，容易拼错。目标是不换
+provider，直接从服务端拉取可选模型。
+
+| 上游资料 | 确认到的事实 | 落地方式 |
+|---|---|---|
+| [Ollama 官方 `/api/tags`](https://docs.ollama.com/api/tags) | `GET /api/tags` 返回 `models[]`，含 `name` / `size` / `modified_at` / `details.parameter_size` / `details.quantization_level` | 本地端点额外读它，补全参数量与量化等级 |
+| [Ollama 官方 OpenAI 兼容页](https://docs.ollama.com/openai) | `GET /v1/models` 可用；本地服务 `api_key` 必填但被忽略；`created` 是修改时间、`owned_by` 默认是 `library` | 用通用接口拿模型名单；本地服务允许空 Key，provider 侧填占位值 `ollama` |
+| Ollama 的两种 base_url 写法 | 用户可能填 `http://host:11434` 或 `http://host:11434/v1` | `endpoints()` 归一化两种写法，分别拼出 `/v1/models` 与 `/api/tags` |
+
+**实现要点**：先问通用接口，本地端点（含 `host.docker.internal`）再问原生接口；
+通用接口失败时原生接口兜底，两边结果按模型 id 合并去重，原生详情优先。
+探测只发 GET，6s 超时、响应上限 2 MB，失败原因与排查提示随 JSON 返回给前端，
+不当成 5xx。设置 `system:manage` 权限才可调，避免把内网服务信息暴露给只读用户。
+
+**取舍**：没有为 Ollama 单独接 `ollama` Python SDK —— 现有 provider 已经是 OpenAI 协议，
+再加一个 SDK 只会多一套依赖和鉴权分支；模型发现只需要两个 GET，直接走 `httpx` 更轻。
+也没有把模型列表缓存下来：本地模型随时可能 `ollama pull`，每次点按钮现取才不会选到过期名字。

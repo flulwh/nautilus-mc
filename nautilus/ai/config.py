@@ -14,6 +14,7 @@ import hashlib
 import logging
 from dataclasses import asdict, dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,7 +53,7 @@ class AiConfig:
     #: 为 False 时，标记为危险的工具要人工点确认。
     auto_approve: bool = False
 
-    def clamp(self) -> "AiConfig":
+    def clamp(self) -> AiConfig:
         self.max_steps = max(1, min(int(self.max_steps or 12), 40))
         self.base_url = (self.base_url or "").strip().rstrip("/")
         self.model = (self.model or "").strip()
@@ -80,6 +81,27 @@ def _decrypt(token: str) -> str:
         # secret_key 换过了：旧密文再也解不开，当作没配 key，别让整个面板崩。
         log.warning("AI api_key 无法解密（secret_key 可能已更换），请重新填写")
         return ""
+
+
+#: 这些主机上的服务（Ollama / Ollama in Docker / 本机其它兼容端）不需要密钥。
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"})
+
+
+def is_local_endpoint(base_url: str) -> bool:
+    """是否是本机/同机容器端点。用于放宽无 Key 限制和决定是否探测原生接口。"""
+    try:
+        host = (urlsplit(base_url).hostname or "").lower().strip("[]")
+    except ValueError:
+        return False
+    return host in LOCAL_HOSTS
+
+
+def key_required(base_url: str) -> bool:
+    """https 远端要密钥；本机或明文 http 端点（如 Ollama）不要。"""
+    try:
+        return urlsplit(base_url).scheme == "https" and not is_local_endpoint(base_url)
+    except ValueError:
+        return True
 
 
 def mask(key: str) -> str:
@@ -136,7 +158,8 @@ def public(cfg: AiConfig) -> dict[str, Any]:
     data["api_key"] = ""
     data["api_key_masked"] = mask(cfg.api_key)
     data["has_key"] = bool(cfg.api_key)
-    data["configured"] = bool(cfg.api_key and cfg.model and cfg.base_url)
+    data["configured"] = bool(cfg.model and cfg.base_url and (cfg.api_key or not key_required(cfg.base_url)))
+    data["key_required"] = key_required(cfg.base_url)
     data["presets"] = list(PRESETS)
     return data
 
@@ -151,13 +174,13 @@ def build_model(cfg: AiConfig) -> Any:
         raise AiConfigError("未配置模型端点 base_url")
     if not cfg.model:
         raise AiConfigError("未配置模型名")
-    if not cfg.api_key:
-        # Ollama 之类的本地端点不校验 key，但 openai 客户端要求非空。
-        if not cfg.base_url.startswith(("http://127.0.0.1", "http://localhost")):
-            raise AiConfigError("未配置 API Key")
+    # 本地服务（Ollama / LM Studio 等）不校验 key；明文 http 端点也不该填真 key。
+    # 其余 https 云服务缺少密钥时直接报清楚，别等到第一次对话才失败。
+    if not cfg.api_key and key_required(cfg.base_url):
+        raise AiConfigError("未配置 API Key")
 
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
 
-    provider = OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key or "local")
+    provider = OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key or "ollama")
     return OpenAIChatModel(cfg.model, provider=provider)

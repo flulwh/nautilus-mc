@@ -149,6 +149,9 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 
 - **接哪家模型**：任何 OpenAI 兼容端点（DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI / 本地 Ollama），
   在「系统设置 -> AI 助手」填 `base_url` + `model` + `api_key` 即可，带「测试连接」按钮。
+- **模型列表直接拉**：点「获取模型列表」从端点的 `/v1/models` 读出模型名；选「本地 Ollama」预设会自动拉一次，
+  并额外读原生 `/api/tags` 补上参数量、量化等级和体积，不用再手抄 `qwen2.5:7b` 这种名字。
+  端点填根地址或 `.../v1` 都行；本机/容器地址的 Ollama 不需要 API Key。
 - **agent 循环**：用 [Pydantic AI](https://github.com/pydantic/pydantic-ai)（Pydantic 官方，MIT），
   不自己写 tool-calling 状态机；工具声明为普通 async 函数，schema 由签名生成。
 - **任务清单与运维手册**：多步任务用 `update_plan` 显式列步骤，前端实时显示进度；
@@ -379,6 +382,7 @@ PUT    /api/system/addresses            # 改地址，mcp_mode=stdio|http
 GET    /api/ai/config                   # 模型配置（API Key 只回显尾号）
 PUT    /api/ai/config                   # 改配置；api_key 传空串表示不修改
 POST   /api/ai/config/test              # 拿当前配置发一句 ping
+POST   /api/ai/models                   # 列出端点模型（/v1/models + Ollama /api/tags）
 GET    /api/ai/tools                    # 工具清单（含权限点、是否危险）
 POST   /api/ai/chat                     # SSE：text / plan / tool_call / tool_result / approval_required / cancelled / done
 POST   /api/ai/approve                  # 批准或拒绝待确认的工具调用，并继续这一轮
@@ -455,6 +459,7 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 | 多步任务与手册 | Claude Code TodoWrite + Claude Agent SDK Skills | 清单显式化进度；手册只在需要时加载，避免把 36 个工具的细节全塞进 system prompt |
 | 审批中断语义 | LangGraph `interrupt()` / `Command(resume=...)` | 待确认调用一次性有效、带 TTL，过期或重复点击不再执行 |
 | 模型接入 | OpenAI 兼容协议 | 国内主流厂商与 Ollama 都遵守，一个 provider 通吃，不必按厂商分支 |
+| 模型发现 | Ollama `/api/tags` + OpenAI `/v1/models` | 通用接口拿名单，原生接口补参数量/量化；两种地址写法都能识别 |
 | MCP | 官方 `mcp` SDK | 让 Claude Desktop / Cursor 等外部 agent 复用同一批工具 |
 
 ---
@@ -479,7 +484,7 @@ nautilus/
 ├── auth/           # fastapi-users 集成（backend, router, schemas）
 ├── servers/        # 进程监管、jar 分发、指标采样、日志解析、RCON、cron 调度
 ├── resources/      # 配置文件读写、文件沙箱、插件市场、备份归档、玩家名单
-├── ai/             # AI 助手：配置(密钥加密) / 工具层 / agent 装配 / 会话 / 计划 / 手册 / 运行控制
+├── ai/             # AI 助手：配置(密钥加密) / 模型发现 / 工具层 / agent 装配 / 会话 / 计划 / 手册 / 运行控制
 ├── mcp_server.py   # MCP 服务端（python -m nautilus.mcp_server）
 ├── webui/dist/     # 构建后的前端
 ├── ws.py           # 控制台/事件 WebSocket

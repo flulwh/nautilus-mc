@@ -40,6 +40,13 @@ class ConfigIn(BaseModel):
     auto_approve: bool | None = None
 
 
+class ModelsIn(BaseModel):
+    #: 允许用界面上刚改、还没保存的地址直接探测；不传则沿用已保存配置。
+    base_url: str | None = Field(default=None, max_length=300)
+    #: null = 沿用已保存密钥；空串 = 不用密钥（本地 Ollama）。
+    api_key: str | None = Field(default=None, max_length=400)
+
+
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = Field(default=None, max_length=32)
@@ -137,6 +144,23 @@ async def test_config(session: SessionDep) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     return {"ok": True, "reply": str(result.output)[:80], "model": cfg.model}
+
+
+@router.post("/models", dependencies=[Depends(require("system", "manage"))])
+async def list_models(payload: ModelsIn, session: SessionDep) -> dict[str, Any]:
+    """直接列出端点上的模型，省得手填模型名。
+
+    支持 OpenAI 兼容的 ``/v1/models`` 与 Ollama 原生的 ``/api/tags``，
+    失败原因随响应返回给前端展示，不当成 5xx。
+    """
+    from ..ai import discovery
+
+    cfg = await ai_config.load(session)
+    base_url = payload.base_url if payload.base_url is not None else cfg.base_url
+    api_key = cfg.api_key if payload.api_key is None else payload.api_key
+    if not base_url.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先填写模型端点")
+    return await discovery.discover(base_url, api_key)
 
 
 @router.get("/tools", dependencies=[Depends(require("server", "read"))])

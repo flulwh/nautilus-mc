@@ -193,6 +193,7 @@ export interface AiConfig {
   api_key_masked: string;
   has_key: boolean;
   configured: boolean;
+  key_required: boolean;
   max_steps: number;
   auto_approve: boolean;
   presets: { label: string; base_url: string; model: string }[];
