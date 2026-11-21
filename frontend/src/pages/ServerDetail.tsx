@@ -1,0 +1,265 @@
+import {
+  ActionIcon,
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Group,
+  Loader,
+  Stack,
+  Tabs,
+  Text,
+  Tooltip,
+} from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import {
+  IconArrowLeft,
+  IconChartAreaLine,
+  IconDeviceFloppy,
+  IconFolder,
+  IconPlayerPlay,
+  IconPlayerStop,
+  IconPuzzle,
+  IconRefresh,
+  IconSettings,
+  IconTerminal2,
+  IconUsers,
+} from "@tabler/icons-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+
+import { api, ApiError } from "../api";
+import { StatusBadge } from "../components/StatusBadge";
+import type { Me, Server } from "../types";
+import { useSocket } from "../useSocket";
+// Tabs are code-split: xterm (~250KB) and uPlot are only fetched when opened.
+const ConsoleTab = lazy(() => import("./tabs/ConsoleTab").then((m) => ({ default: m.ConsoleTab })));
+const FilesTab = lazy(() => import("./tabs/FilesTab").then((m) => ({ default: m.FilesTab })));
+const ConfigTab = lazy(() => import("./tabs/ConfigTab").then((m) => ({ default: m.ConfigTab })));
+const PluginsTab = lazy(() => import("./tabs/PluginsTab").then((m) => ({ default: m.PluginsTab })));
+const MetricsTab = lazy(() => import("./tabs/MetricsTab").then((m) => ({ default: m.MetricsTab })));
+const SettingsTab = lazy(() => import("./tabs/SettingsTab").then((m) => ({ default: m.SettingsTab })));
+
+function TabFallback() {
+  return (
+    <Group justify="center" py="xl">
+      <Loader size="sm" color="abyss" />
+    </Group>
+  );
+}
+
+export function ServerDetail() {
+  const { id } = useParams();
+  const serverId = Number(id);
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<string | null>("console");
+  const [live, setLive] = useState<{ state?: string; players?: string[]; install_pct?: number }>({});
+
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.get<Me>("/auth/me"), staleTime: 60_000 });
+  const perms = me.data?.permissions ?? [];
+  const isAdmin = me.data?.user.role === "admin" || perms.includes("*:.*");
+  const can = (action: string) => isAdmin || perms.includes(`server:${action}`);
+
+  const server = useQuery<Server>({
+    queryKey: ["server", String(serverId)],
+    queryFn: () => api.get<Server>(`/servers/${serverId}`),
+    enabled: Number.isFinite(serverId),
+    refetchInterval: 8000,
+  });
+
+  useSocket(Number.isFinite(serverId) ? `/ws/servers/${serverId}` : null, (msg) => {
+    if (msg.t === "state") {
+      setLive({ state: String(msg.state), players: (msg.players as string[]) ?? [], install_pct: Number(msg.install_pct) });
+    } else if (msg.t === "players") {
+      setLive((v) => ({ ...v, players: (msg.players as string[]) ?? [] }));
+    } else if (msg.t === "progress") {
+      setLive((v) => ({ ...v, install_pct: Number(msg.pct) }));
+    }
+  });
+
+  useEffect(() => {
+    if (live.install_pct === 100) qc.invalidateQueries({ queryKey: ["server", String(serverId)] });
+  }, [live.install_pct, qc, serverId]);
+
+  const control = useMutation({
+    mutationFn: (action: string) => api.post(`/servers/${serverId}/${action}`),
+    onError: (e) => notifications.show({ color: "red", title: "操作失败", message: (e as ApiError).detail }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["server", String(serverId)] }),
+  });
+
+  if (server.isLoading) {
+    return (
+      <Group justify="center" py="xl">
+        <Loader color="abyss" />
+      </Group>
+    );
+  }
+  if (!server.data) {
+    return (
+      <Text c="dimmed" size="sm">
+        服务器不存在或没有访问权限。
+      </Text>
+    );
+  }
+
+  const s = server.data;
+  const state = live.state ?? s.runtime.state;
+  const players = live.players ?? s.runtime.players;
+  const running = state === "running" || state === "starting";
+  const installing = (live.install_pct ?? s.runtime.install_pct) >= 0 && (live.install_pct ?? s.runtime.install_pct) < 100;
+
+  return (
+    <Stack gap="md">
+      <Anchor href="/" underline="never" c="dimmed" size="xs">
+        <Group gap={4}>
+          <IconArrowLeft size={13} /> 返回总览
+        </Group>
+      </Anchor>
+
+      <Card className="glass" p="lg" withBorder>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Box style={{ minWidth: 0 }}>
+            <Group gap={10} mb={6}>
+              <Text fw={650} size="xl" style={{ letterSpacing: "-0.01em" }}>
+                {s.name}
+              </Text>
+              <StatusBadge state={state} />
+              {installing && (
+                <Badge variant="light" color="yellow" size="sm">
+                  安装中 {live.install_pct ?? s.runtime.install_pct}%
+                </Badge>
+              )}
+            </Group>
+            <Group gap="md">
+              <Text size="11px" c="dimmed" className="mono">
+                {s.kind} · {s.version || "未安装"} · {s.jar}
+              </Text>
+              <Text size="11px" c="dimmed" className="mono">
+                :{s.port} / rcon :{s.rcon_port}
+              </Text>
+              {s.runtime.pid && (
+                <Text size="11px" c="dimmed" className="mono">
+                  pid {s.runtime.pid}
+                </Text>
+              )}
+            </Group>
+            {!!players.length && (
+              <Group gap={6} mt={8}>
+                <IconUsers size={13} color="#5d8496" />
+                {players.slice(0, 12).map((p) => (
+                  <Badge key={p} size="xs" variant="light" color="teal">
+                    {p}
+                  </Badge>
+                ))}
+                {players.length > 12 && (
+                  <Text size="10.5px" c="dimmed">
+                    +{players.length - 12}
+                  </Text>
+                )}
+              </Group>
+            )}
+          </Box>
+
+          <Group gap={6} wrap="nowrap">
+            <Tooltip label="刷新">
+              <ActionIcon variant="subtle" color="gray" onClick={() => server.refetch()}>
+                <IconRefresh size={16} />
+              </ActionIcon>
+            </Tooltip>
+            {can("control") && (
+              <>
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="teal"
+                  leftSection={<IconPlayerPlay size={14} />}
+                  loading={control.isPending}
+                  disabled={running || installing}
+                  onClick={() => control.mutate("start")}
+                >
+                  启动
+                </Button>
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="orange"
+                  leftSection={<IconPlayerStop size={14} />}
+                  disabled={!running}
+                  onClick={() => control.mutate("stop")}
+                >
+                  停止
+                </Button>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  leftSection={<IconRefresh size={14} />}
+                  disabled={!running}
+                  onClick={() => control.mutate("restart")}
+                >
+                  重启
+                </Button>
+              </>
+            )}
+          </Group>
+        </Group>
+      </Card>
+
+      <Tabs value={tab} onChange={setTab} variant="pills" radius="md" color="abyss">
+        <Tabs.List>
+          <Tabs.Tab value="console" leftSection={<IconTerminal2 size={14} />}>
+            控制台
+          </Tabs.Tab>
+          <Tabs.Tab value="files" leftSection={<IconFolder size={14} />}>
+            文件
+          </Tabs.Tab>
+          <Tabs.Tab value="config" leftSection={<IconDeviceFloppy size={14} />}>
+            配置
+          </Tabs.Tab>
+          <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={14} />}>
+            插件
+          </Tabs.Tab>
+          <Tabs.Tab value="metrics" leftSection={<IconChartAreaLine size={14} />}>
+            监控
+          </Tabs.Tab>
+          <Tabs.Tab value="settings" leftSection={<IconSettings size={14} />}>
+            设置
+          </Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="console" pt="md">
+          <Suspense fallback={<TabFallback />}>
+            <ConsoleTab serverId={serverId} canSend={can("console")} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="files" pt="md">
+          <Suspense fallback={<TabFallback />}>
+              <FilesTab serverId={serverId} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="config" pt="md">
+          <Suspense fallback={<TabFallback />}>
+              <ConfigTab serverId={serverId} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="plugins" pt="md">
+          <Suspense fallback={<TabFallback />}>
+              <PluginsTab serverId={serverId} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="metrics" pt="md">
+          <Suspense fallback={<TabFallback />}>
+              <MetricsTab serverId={serverId} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="settings" pt="md">
+          <Suspense fallback={<TabFallback />}>
+              <SettingsTab server={s} onChanged={() => server.refetch()} />
+          </Suspense>
+        </Tabs.Panel>
+      </Tabs>
+    </Stack>
+  );
+}

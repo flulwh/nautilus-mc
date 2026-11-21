@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nautilus-mc"
+version = "0.1.0"
+description = "Nautilus - a high-performance, extensible web panel for Minecraft servers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "flulwh" }]
+keywords = ["minecraft", "panel", "server-management", "fastapi"]
+
+dependencies = [
+    # web layer
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "slowapi>=0.1.9",
+    # auth: fastapi-users owns the user model, hashing and JWT/cookie transport
+    "fastapi-users[sqlalchemy]>=15.0",
+    "email-validator>=2.1",
+    # persistence
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
+    "alembic>=1.13",
+    # config & validation
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    # authorisation (Casbin RBAC with role inheritance)
+    "pycasbin>=1.36",
+    # process supervision & telemetry
+    "psutil>=5.9",
+    "apscheduler>=3.10",
+    # round-trip config parsers
+    "ruamel.yaml>=0.18",
+    "jproperties>=2.1",
+    "tomlkit>=0.12",
+    # server integration
+    "httpx>=0.27",
+    "async-mcrcon>=0.1",
+    "mcstatus>=11.0",
+    # io / plumbing
+    "aiofiles>=23.2",
+    "watchdog>=4.0",
+    "cachetools>=5.3",
+    "pluggy>=1.4",
+    "blinker>=1.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+nautilus = "nautilus.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/flulwh/nautilus-mc"
+
+[tool.setuptools.packages.find]
+include = ["nautilus*"]
+
+[tool.setuptools.package-data]
+"nautilus.webui" = ["dist/**/*", "dist/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

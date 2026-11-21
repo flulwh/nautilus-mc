@@ -1,0 +1,10 @@
+# Normalise line endings: the repo stores LF, checkouts stay LF everywhere.
+# (Docker images and systemd units break on CRLF shebangs.)
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary

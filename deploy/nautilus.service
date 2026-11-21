@@ -1,0 +1,46 @@
+[Unit]
+Description=Nautilus — Minecraft server management panel
+Documentation=https://github.com/flulwh/nautilus-mc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A dedicated unprivileged user that owns /opt/nautilus and its data dir:
+#   useradd --system --home /opt/nautilus --shell /usr/sbin/nologin nautilus
+User=nautilus
+Group=nautilus
+WorkingDirectory=/opt/nautilus
+
+Environment=NAUTILUS_HOST=127.0.0.1
+Environment=NAUTILUS_PORT=8199
+Environment=NAUTILUS_DATA_DIR=/opt/nautilus/data
+Environment=NAUTILUS_LOG_LEVEL=info
+# Secrets belong in this file, not in the unit (chmod 600, owned by nautilus).
+EnvironmentFile=-/etc/nautilus/nautilus.env
+
+ExecStart=/opt/nautilus/.venv/bin/python -m nautilus
+
+# The panel kills its own children on shutdown; give the JVM time to save.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=45
+
+Restart=on-failure
+RestartSec=5
+
+# --- sandboxing -----------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/nautilus/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target

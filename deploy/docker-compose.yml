@@ -1,0 +1,35 @@
+services:
+  nautilus:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: nautilus-mc:latest
+    container_name: nautilus
+    restart: unless-stopped
+    ports:
+      # The panel serves plain HTTP; put a TLS-terminating proxy in front of it
+      # for anything reachable from the internet.
+      - "8199:8199"
+    environment:
+      # Required on first boot: seeds the admin account. Change it afterwards
+      # from the UI and delete this line.
+      NAUTILUS_BOOTSTRAP_ADMIN_PASSWORD: "${NAUTILUS_BOOTSTRAP_ADMIN_PASSWORD:?set a strong password}"
+      NAUTILUS_BOOTSTRAP_ADMIN_USER: "admin"
+      # Set to true once the panel is behind HTTPS, otherwise the cookie is
+      # sent over plain HTTP.
+      NAUTILUS_COOKIE_SECURE: "false"
+      # Trust X-Forwarded-For only from the proxy container.
+      NAUTILUS_FORWARDED_ALLOW_IPS: "127.0.0.1"
+      NAUTILUS_LOG_LEVEL: "info"
+    volumes:
+      # Everything the panel owns: SQLite DB, RBAC files, and all server folders.
+      - ./data:/data
+    # Minecraft servers are JS-heavy; give the JVM room beyond the panel itself.
+    shm_size: "1gb"
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8199/api/meta"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
