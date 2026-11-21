@@ -145,17 +145,25 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 
 ### 12. AI 助手
 用自然语言操纵面板：启停服务器、发控制台命令、读写文件与配置、装插件、做备份、切世界、管玩家，
-共 **33 个工具**，覆盖上面所有能力。
+共 **36 个工具**，覆盖上面所有能力。
 
 - **接哪家模型**：任何 OpenAI 兼容端点（DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI / 本地 Ollama），
   在「系统设置 -> AI 助手」填 `base_url` + `model` + `api_key` 即可，带「测试连接」按钮。
 - **agent 循环**：用 [Pydantic AI](https://github.com/pydantic/pydantic-ai)（Pydantic 官方，MIT），
   不自己写 tool-calling 状态机；工具声明为普通 async 函数，schema 由签名生成。
+- **任务清单与运维手册**：多步任务用 `update_plan` 显式列步骤，前端实时显示进度；
+  6 份运维手册（启动失败、装插件、备份恢复、玩家、世界、卡顿）按需 `load_playbook` 加载，
+  对应 Claude Agent SDK 的 Skills 渐进披露与 Claude Code 的 TodoWrite 模式。
+- **能真正停下来**：浏览器上的「停止」会调 `POST /api/ai/cancel`，通过 pydantic-ai 的
+  `CancellationToken` 取消 run 本身；已经完成的工具调用保留在对话里，不会重复执行。
+- **工具超时与历史压缩**：只读工具 60s、写操作 120s、安装/恢复 300s；发给模型的旧工具结果
+  压到 700 字符，最近 12 条原样保留（`ProcessHistory`），长对话不会把上下文撑爆。
 - **权限不旁路**：工具以**当前登录账号**的角色执行，走与 HTTP 路由同一套 Casbin 策略。
   AI 永远不会比调用它的人权限大；每次写操作都进审计日志（`ai.<tool_name>`）。
 - **危险操作要确认**：删世界、删插件、覆盖文件、恢复备份、强杀进程标记为 `dangerous`，
-  默认停下来等你在界面上点「确认执行」；可以在设置里关掉确认。
-- **流式输出**：`POST /api/ai/chat` 返回 SSE，前端实时看到文字增量、每次工具调用与结果。
+  默认停下来等你在界面上点「确认执行」；服务端会核对审批 id 与有效期，过期或重复点击直接拒绝。
+  可以在设置里关掉确认。
+- **流式输出**：`POST /api/ai/chat` 返回 SSE，前端实时看到文字增量、任务清单、每次工具调用与结果。
 - **也能被外部 agent 驱动**：`python -m nautilus.mcp_server` 起一个 MCP server，把同一批工具
   暴露给 Claude Desktop / Cursor 等 —— 与面板内置对话共享权限模型与审计。
 
@@ -372,8 +380,9 @@ GET    /api/ai/config                   # 模型配置（API Key 只回显尾号
 PUT    /api/ai/config                   # 改配置；api_key 传空串表示不修改
 POST   /api/ai/config/test              # 拿当前配置发一句 ping
 GET    /api/ai/tools                    # 工具清单（含权限点、是否危险）
-POST   /api/ai/chat                     # SSE：text / tool_call / tool_result / approval_required / done
+POST   /api/ai/chat                     # SSE：text / plan / tool_call / tool_result / approval_required / cancelled / done
 POST   /api/ai/approve                  # 批准或拒绝待确认的工具调用，并继续这一轮
+POST   /api/ai/cancel                   # 取消正在运行的对话（真停 agent run，不只是断流）
 GET    /api/audit                       # 审计日志
 ```
 
@@ -442,7 +451,9 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 | 插件市场 | Modrinth API / Hangar API | 覆盖 99% 生态，且提供哈希 |
 | 扩展机制 | `pluggy` | pytest 同款，语义稳定 |
 | 前端 | React + Mantine + xterm + uPlot | 控制台与曲线是最吃性能的两块，直接用成熟组件 |
-| AI agent | `pydantic-ai` | 模型往返、工具执行、流式增量、人工审批（`requires_approval`）都是现成的；与本站同为 Pydantic 技术栈，工具就是带类型标注的普通函数 |
+| AI agent | `pydantic-ai` 2.71 | 模型往返、工具执行、流式增量、人工审批（`requires_approval`）都是现成的；本轮进一步用它的 `CancellationToken` / `ProcessHistory` / `tool_timeout` / `capture_run_messages` 做运行控制 |
+| 多步任务与手册 | Claude Code TodoWrite + Claude Agent SDK Skills | 清单显式化进度；手册只在需要时加载，避免把 36 个工具的细节全塞进 system prompt |
+| 审批中断语义 | LangGraph `interrupt()` / `Command(resume=...)` | 待确认调用一次性有效、带 TTL，过期或重复点击不再执行 |
 | 模型接入 | OpenAI 兼容协议 | 国内主流厂商与 Ollama 都遵守，一个 provider 通吃，不必按厂商分支 |
 | MCP | 官方 `mcp` SDK | 让 Claude Desktop / Cursor 等外部 agent 复用同一批工具 |
 
@@ -468,7 +479,7 @@ nautilus/
 ├── auth/           # fastapi-users 集成（backend, router, schemas）
 ├── servers/        # 进程监管、jar 分发、指标采样、日志解析、RCON、cron 调度
 ├── resources/      # 配置文件读写、文件沙箱、插件市场、备份归档、玩家名单
-├── ai/             # AI 助手：配置(密钥加密) / 工具层 / agent 装配 / 会话
+├── ai/             # AI 助手：配置(密钥加密) / 工具层 / agent 装配 / 会话 / 计划 / 手册 / 运行控制
 ├── mcp_server.py   # MCP 服务端（python -m nautilus.mcp_server）
 ├── webui/dist/     # 构建后的前端
 ├── ws.py           # 控制台/事件 WebSocket
@@ -493,7 +504,10 @@ start.bat start.sh  # Windows 与 Linux/macOS 的薄入口
 本项目的每一个"轮子"都来自上游：[fastapi-users](https://github.com/fastapi-users/fastapi-users)、[Casbin](https://github.com/casbin/pycasbin)、
 [Alembic](https://alembic.sqlalchemy.org/)、[APScheduler](https://github.com/agronholm/apscheduler)、[pluggy](https://github.com/pytest-dev/pluggy)、
 [psutil](https://github.com/giampaolo/psutil)、[mcstatus](https://github.com/py-mine/mcstatus)、[async-mcrcon](https://github.com/kevinlindev/async-mcrcon)、
-[Mantine](https://mantine.dev/)、[xterm.js](https://xtermjs.org/)、[uPlot](https://github.com/leeoniya/uPlot)，
+[Mantine](https://mantine.dev/)、[xterm.js](https://xtermjs.org/)、[uPlot](https://github.com/leeoniya/uPlot)、
+[pydantic-ai](https://github.com/pydantic/pydantic-ai) 的 agent/工具/审批模型、
+[openai-agents-python](https://github.com/openai/openai-agents-python) 的 agent loop 与 max_turns 约束、
+[langgraph](https://github.com/langchain-ai/langgraph) 的 interrupt/resume 语义，
 以及 [itzg/mc-server-runner](https://github.com/itzg/mc-server-runner) 的停止阶梯设计。
 
 ## License

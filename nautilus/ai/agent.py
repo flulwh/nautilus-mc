@@ -3,6 +3,10 @@
 为什么用 pydantic-ai 而不是自己写 tool-calling 循环：它已经把「模型往返 ->
 工具执行 -> 再往返」这个状态机、流式增量、以及 ``requires_approval`` 人工审批
 做完了，我们再手写一遍只会漏边界情况。
+
+这一层额外补的是**运维侧的健壮性**：服务端取消、工具超时、失败后保留消息、
+以及长对话里旧工具结果的压缩。做法参考 pydantic-ai 官方的 CancellationToken /
+ProcessHistory 能力与 Claude Agent SDK 的 interrupt + TodoWrite 模式。
 """
 
 from __future__ import annotations
@@ -11,20 +15,34 @@ import asyncio
 import inspect
 import json
 import logging
-from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, replace
+from typing import Any
 
-from pydantic_ai import Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults, Tool, UsageLimits
+from pydantic_ai import (
+    Agent,
+    AgentRunResultEvent,
+    CancellationToken,
+    DeferredToolRequests,
+    DeferredToolResults,
+    RunCancelled,
+    Tool,
+    UsageLimits,
+    capture_run_messages,
+)
+from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.messages import (
     DeferredToolRequestsEvent,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
     PartDeltaEvent,
     TextPartDelta,
+    ToolReturnPart,
 )
 
+from . import approvals as approval_store
 from . import config as ai_config
-from . import tools
+from . import runs, tools
 from .session import conversations
 
 log = logging.getLogger("nautilus.ai.agent")
@@ -33,6 +51,8 @@ INSTRUCTIONS = """你是 Nautilus 的运维助手，通过工具操纵 Minecraft
 
 工作方式：
 - 先用 list_servers 拿到 server_id，不要猜 id。
+- 多步任务开始时用 update_plan 列出步骤，每完成一步就更新一次状态；单步任务不用。
+- 不熟悉的流程先 list_playbooks 看摘要，再用 load_playbook 取完整步骤，照着做，不要凭印象操作。
 - 每个工具都返回 {"ok": true/false, ...}。ok=false 时读 error 字段再决定下一步，
   不要反复重试同一个失败调用。
 - 改配置用 update_config（增量、会自动备份）；改完提醒用户需要重启才生效。
@@ -50,9 +70,61 @@ INSTRUCTIONS = """你是 Nautilus 的运维助手，通过工具操纵 Minecraft
 
 回答用中文，简洁直接，不要复述工具的原始 JSON。"""
 
+#: 这些工具本来就慢，超时按安装/恢复的量级给。
+SLOW_TOOLS = {
+    "install_project",
+    "create_backup",
+    "restore_backup",
+    "server_restart",
+    "run_task",
+}
+#: 发给模型的历史里，过旧的工具结果压到这个长度；最近几轮保持原样。
+HISTORY_KEEP_RECENT = 12
+HISTORY_RESULT_CHARS = 700
+
 
 class AiUnavailable(RuntimeError):
     """AI 未启用或配置不完整。"""
+
+
+def _timeout_for(spec: tools.ToolSpec) -> float:
+    if spec.timeout is not None:
+        return spec.timeout
+    if spec.name in SLOW_TOOLS:
+        return 300.0
+    if spec.mutates:
+        return 120.0
+    return 60.0
+
+
+def _compress_history(messages: list[Any]) -> list[Any]:
+    """压缩旧的工具返回，保留消息顺序和 tool_call/tool_return 配对。
+
+    只改“发给模型”的副本，存下来的历史原封不动（对齐 ProcessHistory 的语义）。
+    截断后模型仍能知道工具做过什么，但不会把几千行日志反复带进上下文。
+    """
+    cutoff = max(0, len(messages) - HISTORY_KEEP_RECENT)
+    out: list[Any] = []
+    for index, message in enumerate(messages[:cutoff]):
+        parts = list(getattr(message, "parts", ()))
+        if not parts:
+            out.append(message)
+            continue
+        changed = False
+        for i, part in enumerate(parts):
+            if not isinstance(part, ToolReturnPart):
+                continue
+            content = part.content
+            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
+            if len(text) > HISTORY_RESULT_CHARS:
+                parts[i] = replace(
+                    part,
+                    content=text[:HISTORY_RESULT_CHARS] + f"...（已压缩，原文 {len(text)} 字符）",
+                )
+                changed = True
+        out.append(replace(message, parts=parts) if changed else message)
+    out.extend(messages[cutoff:])
+    return out
 
 
 def build_agent(cfg: ai_config.AiConfig) -> Agent:
@@ -67,6 +139,8 @@ def build_agent(cfg: ai_config.AiConfig) -> Agent:
             description=(inspect.getdoc(spec.fn) or spec.summary).strip(),
             takes_ctx=False,
             requires_approval=spec.dangerous and need_approval,
+            # 工具超时由框架计时；卡在 RCON / 下载 / 文件锁上时不会再拖死整轮。
+            timeout=_timeout_for(spec),
         )
         for spec in tools.TOOLS.values()
     ]
@@ -77,6 +151,8 @@ def build_agent(cfg: ai_config.AiConfig) -> Agent:
         output_type=[str, DeferredToolRequests],
         instructions=INSTRUCTIONS,
         tools=toolset,
+        tool_timeout=180.0,
+        capabilities=[ProcessHistory(_compress_history)],
     )
 
 
@@ -137,11 +213,15 @@ async def stream_turn(
     ctx: tools.Ctx,
     cfg: ai_config.AiConfig,
     approvals: dict[str, bool] | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """跑一轮对话，逐条吐出事件。
 
     ``approvals`` 不为 None 时表示这是“用户点了确认之后”的续跑：此时不能再给
     新的用户提问（pydantic-ai 会直接报 unprocessed tool calls），只能带审批结果。
+
+    ``cancellation_token`` 由 HTTP 层预先注册：这样即使流还没开始消费，用户点
+    “停止”也能把 run 取消掉。
     """
     if not cfg.enabled:
         yield {"type": "error", "message": "AI 助手未启用，先在「系统设置 -> AI 助手」里打开并填好模型"}
@@ -157,6 +237,7 @@ async def stream_turn(
     kwargs: dict[str, Any] = {
         "message_history": history,
         "usage_limits": UsageLimits(request_limit=max(2, cfg.max_steps)),
+        "cancellation_token": cancellation_token,
     }
     if approvals is not None:
         kwargs["deferred_tool_results"] = DeferredToolResults(approvals=dict(approvals))
@@ -164,63 +245,85 @@ async def stream_turn(
     else:
         user_prompt = prompt or ""
 
-    token = tools.set_ctx(ctx)
+    ctx_token = tools.set_ctx(ctx)
     final: Turn | None = None
     pending: list[dict[str, Any]] | None = None
+    captured: list[Any] = []
+    saved = False
     try:
-        async with agent.run_stream_events(user_prompt, **kwargs) as events:
-            async for event in events:
-                if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-                    delta = event.delta.content_delta
-                    if delta:
-                        yield {"type": "text", "delta": delta}
-                elif isinstance(event, FunctionToolCallEvent):
-                    part = event.part
-                    yield {
-                        "type": "tool_call",
-                        "id": part.tool_call_id,
-                        "name": part.tool_name,
-                        "args": _tool_args(part.args),
-                        "dangerous": bool(tools.TOOLS.get(part.tool_name) and tools.TOOLS[part.tool_name].dangerous),
-                    }
-                elif isinstance(event, FunctionToolResultEvent):
-                    part = event.part
-                    text, failed = _result_text(part.content)
-                    yield {
-                        "type": "tool_result",
-                        "id": part.tool_call_id,
-                        "name": part.tool_name,
-                        "preview": _preview(text),
-                        "failed": failed,
-                    }
-                elif isinstance(event, DeferredToolRequestsEvent):
-                    requests = event.requests
-                    items = [
-                        {
-                            "id": call.tool_call_id,
-                            "name": call.tool_name,
-                            "args": _tool_args(call.args),
-                            "summary": (tools.TOOLS[call.tool_name].summary if call.tool_name in tools.TOOLS else ""),
-                        }
-                        for call in requests.approvals
-                    ]
-                    if items:
-                        pending = items
-                        yield {"type": "approval_required", "items": items}
-                elif isinstance(event, AgentRunResultEvent):
-                    result = event.result
-                    output = result.output
-                    usage = _jsonable(dict(result.usage.__dict__)) if hasattr(result.usage, "__dict__") else None
-                    final = Turn(text=output if isinstance(output, str) else "", usage=usage)
-                    conversations.put(conversation_id, result.all_messages())
-    except asyncio.CancelledError:  # pragma: no cover - 客户端断开
+        # 进入 agent 上下文：pydantic-ai 会在这里复用并在退出时关闭 provider 的
+        # HTTP client。旧实现每次 run 都新建 Agent 却不关 client，长跑会泄漏连接。
+        # 同步的 capture 与两个 async with 不能合并成一个语句；故意保留嵌套。
+        with capture_run_messages() as captured:
+            async with agent:  # noqa: SIM117 - 三个上下文类型不同，无法合并
+                async with agent.run_stream_events(user_prompt, **kwargs) as events:
+                    async for event in events:
+                        if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                            delta = event.delta.content_delta
+                            if delta:
+                                yield {"type": "text", "delta": delta}
+                        elif isinstance(event, FunctionToolCallEvent):
+                            part = event.part
+                            yield {
+                                "type": "tool_call",
+                                "id": part.tool_call_id,
+                                "name": part.tool_name,
+                                "args": _tool_args(part.args),
+                                "dangerous": bool(tools.TOOLS.get(part.tool_name) and tools.TOOLS[part.tool_name].dangerous),
+                            }
+                        elif isinstance(event, FunctionToolResultEvent):
+                            part = event.part
+                            text, failed = _result_text(part.content)
+                            yield {
+                                "type": "tool_result",
+                                "id": part.tool_call_id,
+                                "name": part.tool_name,
+                                "preview": _preview(text),
+                                "failed": failed,
+                            }
+                            if part.tool_name == "update_plan" and not failed:
+                                payload = _jsonable(part.content)
+                                yield {"type": "plan", "plan": payload.get("plan", payload)}
+                        elif isinstance(event, DeferredToolRequestsEvent):
+                            requests = event.requests
+                            items = [
+                                {
+                                    "id": call.tool_call_id,
+                                    "name": call.tool_name,
+                                    "args": _tool_args(call.args),
+                                    "summary": (tools.TOOLS[call.tool_name].summary if call.tool_name in tools.TOOLS else ""),
+                                }
+                                for call in requests.approvals
+                            ]
+                            if items:
+                                pending = items
+                                approval_store.approvals.remember(conversation_id, items)
+                                yield {"type": "approval_required", "items": items}
+                        elif isinstance(event, AgentRunResultEvent):
+                            result = event.result
+                            output = result.output
+                            usage = _jsonable(dict(result.usage.__dict__)) if hasattr(result.usage, "__dict__") else None
+                            final = Turn(text=output if isinstance(output, str) else "", usage=usage)
+                            conversations.put(conversation_id, result.all_messages())
+                            saved = True
+    except RunCancelled:
+        # 取消时保留已完成的部分：下一次提问不会从“半截工具调用”开始。
+        if captured and not saved:
+            conversations.put(conversation_id, captured)
+        yield {"type": "cancelled", "message": "已停止；已完成的操作保留在对话里"}
+        return
+    except asyncio.CancelledError:  # pragma: no cover - 客户端直接断开
+        if captured and not saved:
+            conversations.put(conversation_id, captured)
         raise
     except Exception as exc:  # noqa: BLE001 - 模型/网络错误要变成可读信息
         log.warning("AI 对话失败: %s", exc)
         yield {"type": "error", "message": f"{type(exc).__name__}: {exc}"}
         return
     finally:
-        tools.reset_ctx(token)
+        tools.reset_ctx(ctx_token)
+        if cancellation_token is not None:
+            runs.runs.finish(conversation_id, cancellation_token)
 
     if final is None:
         yield {"type": "error", "message": "模型没有返回结果"}

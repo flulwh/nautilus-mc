@@ -43,6 +43,11 @@ interface ToolChip {
   status: "running" | "done" | "failed" | "waiting";
 }
 
+interface PlanView {
+  title: string;
+  steps: { text: string; status: "pending" | "doing" | "done" | "blocked" }[];
+}
+
 interface Pending {
   id: string;
   name: string;
@@ -54,8 +59,10 @@ interface Bubble {
   role: "user" | "assistant";
   text: string;
   tools: ToolChip[];
+  plan?: PlanView;
   pending?: Pending[];
   error?: string;
+  stopped?: boolean;
 }
 
 /** 逐个读出 SSE 的 `data: {...}` 事件。EventSource 不支持 POST，只能手搓。 */
@@ -159,6 +166,8 @@ export function AssistantPage() {
               t.id === event.id ? { ...t, preview: String(event.preview ?? ""), status: event.failed ? "failed" : "done" } : t,
             ),
           }));
+        } else if (type === "plan") {
+          patchLast((b) => ({ ...b, plan: event.plan as PlanView }));
         } else if (type === "approval_required") {
           const items = (event.items ?? []) as unknown as Pending[];
           patchLast((b) => ({
@@ -166,6 +175,8 @@ export function AssistantPage() {
             pending: items,
             tools: b.tools.map((t) => (items.some((i) => i.id === t.id) ? { ...t, status: "waiting" } : t)),
           }));
+        } else if (type === "cancelled") {
+          patchLast((b) => ({ ...b, stopped: true }));
         } else if (type === "error") {
           patchLast((b) => ({ ...b, error: String(event.message ?? "未知错误") }));
         } else if (type === "done") {
@@ -205,6 +216,14 @@ export function AssistantPage() {
     });
     patchLast((b) => ({ ...b, pending: undefined }));
     await consume("/ai/approve", { conversation_id: cid, approvals });
+  };
+
+  const stop = () => {
+    const cid = conversation.current;
+    if (cid) {
+      api.post("/ai/cancel", { conversation_id: cid }).catch(() => undefined);
+    }
+    abort.current?.abort();
   };
 
   const reset = () => {
@@ -305,6 +324,30 @@ export function AssistantPage() {
                 </Group>
               ) : (
                 <Stack gap={6}>
+                  {bubble.plan && bubble.plan.steps.length > 0 && (
+                    <Box p="xs" style={{ borderLeft: "2px solid var(--line)" }}>
+                      <Text fz={11} fw={600}>
+                        {bubble.plan.title}
+                      </Text>
+                      {bubble.plan.steps.map((step, i) => (
+                        <Group key={i} gap={6} wrap="nowrap">
+                          <Text fz={10.5} c="dimmed" className="mono">
+                            {step.status === "done"
+                              ? "x"
+                              : step.status === "doing"
+                                ? ">"
+                                : step.status === "blocked"
+                                  ? "!"
+                                  : "-"}
+                          </Text>
+                          <Text fz={11} c={step.status === "done" ? "dimmed" : undefined} td={step.status === "done" ? "line-through" : undefined}>
+                            {step.text}
+                          </Text>
+                        </Group>
+                      ))}
+                    </Box>
+                  )}
+
                   {bubble.tools.map((tool) => (
                     <Group key={tool.id || tool.name} gap={6} wrap="nowrap" align="flex-start">
                       {tool.status === "running" ? (
@@ -385,6 +428,12 @@ export function AssistantPage() {
                     </Alert>
                   )}
 
+                  {bubble.stopped && (
+                    <Text fz={11} c="dimmed">
+                      已停止
+                    </Text>
+                  )}
+
                   {bubble.error && (
                     <Alert color="red" variant="light" p="xs">
                       <Text fz={11.5}>{bubble.error}</Text>
@@ -416,7 +465,7 @@ export function AssistantPage() {
             }}
           />
           {busy ? (
-            <ActionIcon variant="default" size="lg" onClick={() => abort.current?.abort()} aria-label="停止">
+            <ActionIcon variant="default" size="lg" onClick={stop} aria-label="停止">
               <IconPlayerStop size={15} />
             </ActionIcon>
           ) : (

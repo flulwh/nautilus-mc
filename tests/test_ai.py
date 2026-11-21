@@ -212,7 +212,7 @@ async def test_dangerous_tool_needs_approval(admin, monkeypatch):
     assert item["name"] == "server_kill"
     assert "强制" in item["summary"] or "结束" in item["summary"]
 
-    done = [e for e in events if e["type"] == "done"][0]
+    done = next(e for e in events if e["type"] == "done")
     conversation_id = next(e for e in events if e["type"] == "open")["conversation_id"]
     assert done["pending"], "done 里要告诉前端还有待确认项"
 
@@ -224,7 +224,7 @@ async def test_dangerous_tool_needs_approval(admin, monkeypatch):
     assert r.status_code == 200
     after = _events(r.text)
     assert any(e["type"] == "done" for e in after)
-    assert "已取消" in [e for e in after if e["type"] == "done"][0]["text"]
+    assert "已取消" in next(e for e in after if e["type"] == "done")["text"]
 
 
 async def test_approve_unknown_conversation(admin):
@@ -241,3 +241,163 @@ async def test_mcp_exposes_every_tool():
     exposed = {tool.name for tool in await server.list_tools()}
     assert exposed == set(ai_tools.TOOLS)
     assert len(exposed) >= 30
+
+
+# ------------------------------------------------------------- agent extras
+async def test_plan_and_playbook_tools():
+    from nautilus.ai import plan as plan_store
+
+    token = ai_tools.set_ctx(ai_tools.Ctx(username="planner", conversation_id="c1"))
+    try:
+        out = await ai_tools.TOOLS["update_plan"].fn(
+            "安装插件",
+            [{"text": "搜索插件", "status": "done"}, {"text": "安装并重启"}],
+        )
+        assert out["ok"] is True
+        assert out["plan"]["steps"][0]["status"] == "done"
+        assert plan_store.plans.get("planner:c1") == out["plan"]
+
+        out = await ai_tools.TOOLS["list_playbooks"].fn()
+        assert out["ok"] is True and any(item["name"] == "install_plugin" for item in out["playbooks"])
+        out = await ai_tools.TOOLS["load_playbook"].fn("install_plugin")
+        assert out["ok"] is True and "search_projects" in out["body"]
+        assert (await ai_tools.TOOLS["load_playbook"].fn("不存在的手册"))["ok"] is False
+        assert (await ai_tools.TOOLS["update_plan"].fn("x", [{"text": ""}]))["ok"] is False
+    finally:
+        ai_tools.reset_ctx(token)
+
+
+async def test_chat_emits_plan_event(admin, monkeypatch):
+    await _enable_ai()
+    monkeypatch.setattr(
+        ai_config,
+        "build_model",
+        lambda cfg: _tool_then_text(
+            "update_plan",
+            {"title": "做备份", "steps": [{"text": "停服"}, {"text": "备份"}]},
+            "计划列好了",
+        ),
+    )
+    r = await admin.post("/api/ai/chat", json={"message": "列个备份计划"})
+    events = _events(r.text)
+    plans = [event for event in events if event["type"] == "plan"]
+    assert plans, f"应当有 plan 事件，实际：{[e['type'] for e in events]}"
+    assert plans[0]["plan"]["title"] == "做备份"
+    assert len(plans[0]["plan"]["steps"]) == 2
+
+
+async def test_approve_rejects_wrong_ids_and_replay(admin, monkeypatch):
+    await _enable_ai(auto_approve=False)
+    monkeypatch.setattr(
+        ai_config,
+        "build_model",
+        lambda cfg: _tool_then_text("server_kill", {"server_id": 999999}, "已处理"),
+    )
+    r = await admin.post("/api/ai/chat", json={"message": "强杀服务器"})
+    events = _events(r.text)
+    item = next(event for event in events if event["type"] == "approval_required")["items"][0]
+    cid = next(event for event in events if event["type"] == "open")["conversation_id"]
+
+    bad = await admin.post(
+        "/api/ai/approve",
+        json={"conversation_id": cid, "approvals": {"made-up-id": True}},
+    )
+    assert bad.status_code == 409, bad.text
+
+    good = await admin.post(
+        "/api/ai/approve",
+        json={"conversation_id": cid, "approvals": {item["id"]: True}},
+    )
+    assert good.status_code == 200, good.text
+
+    replay = await admin.post(
+        "/api/ai/approve",
+        json={"conversation_id": cid, "approvals": {item["id"]: True}},
+    )
+    assert replay.status_code == 409, "审批用掉后不能再重放"
+
+
+async def test_cancel_endpoint_without_run(admin):
+    r = await admin.post("/api/ai/cancel", json={"conversation_id": "nothing-running"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "stopped": False}
+
+
+async def test_cancel_stops_agent_run(monkeypatch):
+    import asyncio
+
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from nautilus.ai import agent as ai_agent
+    from nautilus.ai import runs as run_store
+    from nautilus.ai.session import conversations
+
+    await _enable_ai()
+    started = asyncio.Event()
+
+    def fn(messages, info):
+        return ModelResponse(parts=[TextPart("hi")])
+
+    async def stream(messages, info):
+        started.set()
+        yield "partial"
+        await asyncio.sleep(30)
+        yield "never"
+
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: FunctionModel(fn, stream_function=stream))
+    async with session_scope() as s:
+        cfg = await ai_config.load(s)
+
+    key = "cancel-test-conversation"
+    token = run_store.runs.register(key)
+    ctx = ai_tools.Ctx(username="admin", conversation_id=key)
+    events: list[dict] = []
+
+    async def consume():
+        async for event in ai_agent.stream_turn(
+            prompt="hi", conversation_id=key, ctx=ctx, cfg=cfg, cancellation_token=token
+        ):
+            events.append(event)
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(started.wait(), 5)
+    await asyncio.sleep(0)
+    assert run_store.runs.cancel(key) is True
+    await asyncio.wait_for(task, 5)
+    assert any(event["type"] == "cancelled" for event in events)
+    assert conversations.get(key), "取消时已产生的消息要能留给下一轮"
+    assert not run_store.runs.active(key)
+
+
+def test_history_compression_keeps_recent_and_original():
+    from dataclasses import replace as dc_replace
+
+    from pydantic_ai.messages import ModelResponse, ToolReturnPart
+
+    from nautilus.ai.agent import _compress_history
+
+    old = ModelResponse(parts=[ToolReturnPart(tool_name="t", content="x" * 1000, tool_call_id="1")])
+    recent = ModelResponse(parts=[ToolReturnPart(tool_name="t", content="y" * 1000, tool_call_id="2")])
+    messages = [old] * 13 + [recent]
+    out = _compress_history(messages)
+    assert len(out) == len(messages)
+    assert len(out[0].parts[0].content) < 1000 and "已压缩" in out[0].parts[0].content
+    assert out[-1].parts[0].content == "y" * 1000
+    assert old.parts[0].content == "x" * 1000, "压缩只影响发给模型的副本"
+    assert dc_replace(old, parts=[]).parts == []
+
+
+def test_agent_applies_tool_timeouts():
+    from nautilus.ai import agent as ai_agent
+
+    cfg = ai_config.AiConfig(
+        enabled=True,
+        base_url="http://127.0.0.1:1/v1",
+        model="m",
+        api_key="x",
+    )
+    built = ai_agent.build_agent(cfg)
+    registered = built._function_toolset.tools
+    assert registered["list_servers"].timeout == 60.0
+    assert registered["update_config"].timeout == 120.0
+    assert registered["create_backup"].timeout == 300.0

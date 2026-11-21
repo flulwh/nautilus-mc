@@ -22,8 +22,9 @@
 │  Interface      api/*.py  routers · ws.py · deps.py       │
 │                 (只做参数校验、鉴权、编排，不含业务逻辑)      │
 ├─────────────────────────────────────────────────────────┤
-│  AI             ai/(agent,session,config) · mcp_server    │
-│                 (agent 循环、流式事件、人工审批、MCP 适配)  │
+│  AI             ai/(agent,session,config,plan,playbooks,  │
+│                 runs,approvals) · mcp_server              │
+│                 (agent 循环、流式事件、计划/手册、运行控制)  │
 ├─────────────────────────────────────────────────────────┤
 │  Domain         servers/(manager,rcon,logbus,metrics,     │
 │                 provision) · configs/ · plugins/          │
@@ -68,9 +69,13 @@
 | 审计 | `audit.py` | 所有写操作的不可变记录 | `audit.record(...)` |
 | 地址配置 | `addresses.py` | 面板对外地址（Host 推断兜底）、MCP 传输模式/监听地址，存 `settings_kv` | `load/save/public` |
 | AI 配置 | `ai/config.py` | 端点/模型/密钥配置，Fernet 加密后存 `settings_kv` | `load/save` |
-| AI 工具 | `ai/tools.py` | 把面板能力封装为 33 个工具：Casbin 权限、危险标记、统一返回、写审计；不依赖 pydantic-ai / FastAPI | `TOOLS / catalogue()` |
-| AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、人工审批后续跑 | `stream_turn()` |
+| AI 工具 | `ai/tools.py` | 把面板能力封装为 36 个工具：Casbin 权限、危险标记、超时、统一返回、写审计；不依赖 pydantic-ai / FastAPI | `TOOLS / catalogue()` |
+| AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、审批续跑、取消、工具超时、历史压缩、失败保留消息 | `stream_turn() / build_agent()` |
 | AI 会话 | `ai/session.py` | 进程内多轮历史，按用户提问裁剪 + TTL/LRU | `conversations` |
+| 任务清单 | `ai/plan.py` | 按会话保存步骤与状态，模型通过 `update_plan` 更新，SSE `plan` 事件驱动前端 | `plans` |
+| 运维手册 | `ai/playbooks.py` | 6 份按需加载的 SOP；常驻上下文只留摘要 | `catalogue() / get()` |
+| 运行控制 | `ai/runs.py` | 每会话一个 `CancellationToken`，支持取消、重复运行保护、僵尸清理 | `runs` |
+| 审批状态 | `ai/approvals.py` | 服务端记录暂停的调用，校验 id 与 TTL，用后即焚 | `approvals` |
 | MCP | `mcp_server.py` | 官方 `mcp` SDK，stdio / streamable-http，复用同一批工具 | `python -m nautilus.mcp_server` |
 
 ## 4. 关键流程
@@ -136,14 +141,28 @@ POST /api/ai/chat (SSE)
       PartDeltaEvent(TextPartDelta)   → SSE text
       FunctionToolCallEvent           → SSE tool_call
       DeferredToolRequestsEvent       → SSE approval_required（dangerous 且未开自动确认）
-      FunctionToolResultEvent         → SSE tool_result
+      FunctionToolResultEvent         → SSE tool_result（update_plan 额外发 SSE plan）
       AgentRunResultEvent             → SSE done（usage / pending）
   → ai/tools.py 包装器：_require(obj, act) → 真实服务函数 → audit.record("ai.<tool>")
 ```
 
+运行控制：
+
+- `POST /api/ai/chat` 在返回流之前先把 `CancellationToken` 注册进 `ai/runs.py`；
+  `POST /api/ai/cancel` 直接 cancel 它，run 抛 `RunCancelled`，`stream_turn` 发出 SSE
+  `cancelled` 并用 `capture_run_messages()` 把已产生的消息写回会话。
+- 每个工具有超时（只读 60s / 写 120s / 安装恢复 300s），由 `Tool(timeout=...)` 与
+  Agent 级 `tool_timeout` 双重兜底，避免 RCON 或下载卡死整轮。
+- 同一会话不允许两个 run 并存（409），防止两份 `message_history` 互相覆盖；
+  僵尸登记项按 TTL 清理。
+- `ProcessHistory(_compress_history)` 只压缩发给模型的旧工具结果，不改写存下来的历史；
+  最近 12 条消息原样发送，tool_call / tool_return 配对保持不变。
+
 确认续跑：`POST /api/ai/approve` 带 `{call_id: bool}` 回到 `stream_turn()`，
 以 `DeferredToolResults` 恢复这一轮。**恢复时不能再传用户 prompt**，否则
 pydantic-ai 会报 unprocessed tool calls；所以确认接口只接审批结果。
+审批项由 `ai/approvals.py` 按会话保存，30 分钟过期，id 不匹配或重复使用返回 409
+（语义参考 LangGraph 的 `interrupt()` / `Command(resume=...)`）。
 
 外部 agent：`python -m nautilus.mcp_server` 把 `tools.TOOLS` 原样注册为 MCP 工具，
 身份取自启动进程的环境变量 `NAUTILUS_MCP_ROLE` / `NAUTILUS_MCP_USER`，
@@ -191,6 +210,7 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | GET | `/api/ai/tools` | `system:read` |
 | POST | `/api/ai/chat` | `system:read`（SSE 流式） |
 | POST | `/api/ai/approve` | `system:read` |
+| POST | `/api/ai/cancel` | `server:read` |
 | GET | `/api/servers/{id}/plugins/search?q=` | `server:plugins` |
 | POST | `/api/servers/{id}/plugins/install` | `server:plugins` |
 | GET | `/api/servers/{id}/metrics?window=300` | `server:read` |
@@ -220,6 +240,8 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | 模型密钥 | Fernet 加密后存 `settings_kv`，密钥由 `secret_key` 派生；接口只回掩码，换密钥后旧密文失效而非崩溃 |
 | 地址注入 | 面板地址留空时按 `Host`/`X-Forwarded-Proto` 推断；MC 进服地址由每台服务器的 `public_address` 提供，AI 不猜端口 |
 | AI 越权 | 每个工具声明 `(obj, act)`，执行前以**当前用户角色**过 Casbin；AI 永远不会比调用者权限大 |
+| AI 误操作 | 危险工具需服务端校验的一次性审批；停止按钮真取消 run；工具超时兜底；同一会话禁止并发写历史 |
+| 审批重放 | 待确认项带 30 分钟 TTL，确认后即销毁；过期页面重复点击只会得到 409 |
 | 危险操作 | 删除/覆盖/强杀等工具标记 `dangerous`，未开自动确认时用 `DeferredToolRequests` 停下来等人点头，按 `call_id` 绑定结果 |
 | 上下文膨胀 | 单个工具返回上限 24k 字符；模型往返步数上限 `max_steps`（1~40） |
 | MCP 暴露 | 复用同一批工具与审计；默认 stdio，配置切 http 时只监听 127.0.0.1；绑非本机地址会告警，身份由启动环境变量决定 |

@@ -9,13 +9,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..ai import approvals as approval_store
 from ..ai import config as ai_config
+from ..ai import plan as plan_store
+from ..ai import runs as run_store
 from ..ai import tools as ai_tools
 from ..ai.session import conversations
 from ..audit import record
@@ -46,6 +50,10 @@ class ApproveIn(BaseModel):
     approvals: dict[str, bool]
 
 
+class CancelIn(BaseModel):
+    conversation_id: str = Field(min_length=1, max_length=32)
+
+
 def _key(user: User, conversation_id: str) -> str:
     """会话按用户隔离：id 前缀就是用户 id，别人的 id 拼不出你的 key。"""
     return f"{user.id}:{conversation_id}"
@@ -62,7 +70,7 @@ def _response(events: AsyncIterator[dict[str, Any]]) -> StreamingResponse:
                 yield _sse(event)
         except asyncio.CancelledError:  # 客户端点了停止/关了页面
             raise
-        except Exception as exc:  # noqa: BLE001 - 流已开始，只能把错误写进事件
+        except Exception as exc:
             log.exception("AI 事件流中断")
             yield _sse({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
 
@@ -124,7 +132,7 @@ async def test_config(session: SessionDep) -> dict[str, Any]:
     try:
         agent = Agent(model, instructions="只回复 OK 两个字符，不要别的。")
         result = await asyncio.wait_for(agent.run("ping"), timeout=30)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"ok": False, "error": "连接超时（30s）"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -146,21 +154,28 @@ async def chat(payload: ChatIn, session: SessionDep, request: Request, user: Use
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "AI 助手未启用")
 
     conversation_id = payload.conversation_id or conversations.new_id()
+    key = _key(user, conversation_id)
+    if run_store.runs.active(key):
+        # 两份 run 同时写同一个 message_history 会互相覆盖；明确拒绝比静默丢历史好。
+        raise HTTPException(status.HTTP_409_CONFLICT, "这一轮还在运行，先点停止再发新消息")
+    token = run_store.runs.register(key)
     ctx = ai_tools.Ctx(
         role=user.role,
         user_id=user.id,
         username=user.username,
         ip=client_ip(request),
         source="panel",
+        conversation_id=key,
     )
 
     async def events() -> AsyncIterator[dict[str, Any]]:
         yield {"type": "open", "conversation_id": conversation_id, "model": cfg.model}
         async for event in stream_turn(
             prompt=payload.message,
-            conversation_id=_key(user, conversation_id),
+            conversation_id=key,
             ctx=ctx,
             cfg=cfg,
+            cancellation_token=token,
         ):
             yield event
 
@@ -173,16 +188,25 @@ async def approve(payload: ApproveIn, session: SessionDep, request: Request, use
     from ..ai.agent import stream_turn
 
     cfg = await ai_config.load(session)
+    key = _key(user, payload.conversation_id)
+    if conversations.get(key) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已过期")
+    # 过期页面或重复点击不能再触发一次确认。
+    problem = approval_store.approvals.validate(key, payload.approvals)
+    if problem:
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
+    if run_store.runs.active(key):
+        raise HTTPException(status.HTTP_409_CONFLICT, "这一轮还在运行，先点停止再确认")
+    approval_store.approvals.consume(key)
+    token = run_store.runs.register(key)
     ctx = ai_tools.Ctx(
         role=user.role,
         user_id=user.id,
         username=user.username,
         ip=client_ip(request),
         source="panel",
+        conversation_id=key,
     )
-    key = _key(user, payload.conversation_id)
-    if conversations.get(key) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已过期")
 
     async def events() -> AsyncIterator[dict[str, Any]]:
         async for event in stream_turn(
@@ -191,10 +215,18 @@ async def approve(payload: ApproveIn, session: SessionDep, request: Request, use
             ctx=ctx,
             cfg=cfg,
             approvals=payload.approvals,
+            cancellation_token=token,
         ):
             yield event
 
     return _response(events())
+
+
+@router.post("/cancel", dependencies=[Depends(require("server", "read"))])
+async def cancel(payload: CancelIn, user: UserDep) -> dict[str, Any]:
+    """停止正在运行的对话。直接取消 agent run，而不只是断开浏览器的流。"""
+    stopped = run_store.runs.cancel(_key(user, payload.conversation_id))
+    return {"ok": True, "stopped": stopped}
 
 
 @router.get("/conversations", dependencies=[Depends(require("system", "read"))])
@@ -208,4 +240,8 @@ async def list_conversations(user: UserDep) -> dict[str, Any]:
 
 @router.delete("/conversations/{conversation_id}", status_code=204, dependencies=[Depends(require("server", "read"))])
 async def drop_conversation(conversation_id: str, user: UserDep) -> None:
-    conversations.drop(_key(user, conversation_id))
+    key = _key(user, conversation_id)
+    run_store.runs.drop(key)
+    approval_store.approvals.drop(key)
+    plan_store.plans.drop(key)
+    conversations.drop(key)

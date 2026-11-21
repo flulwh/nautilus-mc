@@ -221,3 +221,45 @@ gh api graphql -F query=@scripts/repo-metrics.graphql   # 仓库指标
 curl -s https://fill.papermc.io/v3/projects/paper/versions/1.21.4/builds/latest
 curl -s "https://api.modrinth.com/v2/search?limit=1" -H "User-Agent: nautilus/0.1"
 ```
+
+---
+
+## 8. Agent 能力补强（2026-11-22）
+
+本轮目标不是换框架，而是把已有 agent 的**运行控制**补齐。先查上游，再按本项目单进程
+部署的现实取舍实现；没有引入新运行时依赖。
+
+| 上游项目 / 文档 | 采用的点 | 本项目落地方式 |
+|---|---|---|
+| [`pydantic/pydantic-ai`](https://github.com/pydantic/pydantic-ai) 2.71 的 [Advanced Tool Features](https://pydantic.dev/docs/ai/tools-toolsets/tools-advanced/) | `CancellationToken` 从 run 外部取消；Agent/工具级 `tool_timeout`；`ToolFailed` 与重试边界 | `ai/runs.py` + `/api/ai/cancel`；工具按只读/写/安装分 60/120/300s；取消时保留已完成消息 |
+| 同项目的 [ProcessHistory](https://pydantic.dev/docs/ai/capabilities/process-history/) 与 `capture_run_messages()` | 历史处理器只影响发给模型的消息；失败运行仍能取回消息 | `ai/agent.py::_compress_history` 压缩旧工具结果（保留最近 12 条、配对不乱）；取消后写回会话 |
+| 同项目 [Building AI Agents SKILL.md](https://github.com/pydantic/pydantic-ai/blob/main/pydantic_ai_slim/pydantic_ai/.agents/skills/building-pydantic-ai-agents/SKILL.md) | 长驻服务要进入 Agent 上下文，避免每轮重建 provider/HTTP client | `stream_turn` 用 `async with agent:` 包住 run |
+| [`openai/openai-agents-python`](https://github.com/openai/openai-agents-python) 的 agent loop 与 `max_turns` | 必须有轮次上界；工具多时按领域拆分而不是让一个 agent 面对几十个入口 | 保留 `UsageLimits(request_limit=max_steps)`；用手册做场景化分组，不拆多 agent（会重复一套权限上下文） |
+| [`langchain-ai/langgraph`](https://github.com/langchain-ai/langgraph) 的 [Human-in-the-loop](https://github.com/langchain-ai/langgraphjs/blob/main/docs/docs/agents/human-in-the-loop.md) | `interrupt()` / `Command(resume=...)` 的一次性审批语义；过期与重复恢复要处理 | `ai/approvals.py`：30 分钟 TTL、id 全量比对、确认后销毁；重复点击返回 409 |
+| Claude Code 的 TodoWrite 与 [Agent SDK Skills](https://platform.claude.com/docs/en/agent-sdk/skills) | 多步任务显式列清单；长指令按需加载，常驻上下文只放摘要 | `ai/plan.py` + `update_plan`（SSE `plan` 事件）；`ai/playbooks.py` 6 份 SOP 按需 `load_playbook` |
+
+**取舍**：没有引入 LangGraph / OpenAI Agents SDK —— 它们会替换掉现有的 pydantic-ai
+工具层与 Casbin 权限包装，收益不足以抵消重写风险；本项目只取可独立落地的模式。
+也没有启用工具搜索（ToolSearch）：36 个工具尚在可控范围，且国内 OpenAI 兼容端点对
+provider 原生工具发现支持不一致，本地策略反而会引入额外往返。
+
+---
+
+## 8. Agent 能力补强（2026-11-22）
+
+本轮目标不是换框架，而是把已有 agent 的**运行控制**补齐。先查上游，再按本项目单进程
+部署的现实取舍实现；没有引入新运行时依赖。
+
+| 上游项目 / 文档 | 采用的点 | 本项目落地方式 |
+|---|---|---|
+| [`pydantic/pydantic-ai`](https://github.com/pydantic/pydantic-ai) 2.71 的 [Advanced Tool Features](https://pydantic.dev/docs/ai/tools-toolsets/tools-advanced/) | `CancellationToken` 从 run 外部取消；Agent/工具级 `tool_timeout`；`ToolFailed` 与重试边界 | `ai/runs.py` + `/api/ai/cancel`；工具按只读/写/安装分 60/120/300s；取消时保留已完成消息 |
+| 同项目的 [ProcessHistory](https://pydantic.dev/docs/ai/capabilities/process-history/) 与 `capture_run_messages()` | 历史处理器只影响发给模型的消息；失败运行仍能取回消息 | `ai/agent.py::_compress_history` 压缩旧工具结果（保留最近 12 条、配对不乱）；取消后写回会话 |
+| 同项目 [Building AI Agents SKILL.md](https://github.com/pydantic/pydantic-ai/blob/main/pydantic_ai_slim/pydantic_ai/.agents/skills/building-pydantic-ai-agents/SKILL.md) | 长驻服务要进入 Agent 上下文，避免每轮重建 provider/HTTP client | `stream_turn` 用 `async with agent:` 包住 run |
+| [`openai/openai-agents-python`](https://github.com/openai/openai-agents-python) 的 agent loop 与 `max_turns` | 必须有轮次上界；工具多时按领域拆分而不是让一个 agent 面对几十个入口 | 保留 `UsageLimits(request_limit=max_steps)`；用手册做场景化分组，不拆多 agent（会重复一套权限上下文） |
+| [`langchain-ai/langgraph`](https://github.com/langchain-ai/langgraph) 的 [Human-in-the-loop](https://github.com/langchain-ai/langgraphjs/blob/main/docs/docs/agents/human-in-the-loop.md) | `interrupt()` / `Command(resume=...)` 的一次性审批语义；过期与重复恢复要处理 | `ai/approvals.py`：30 分钟 TTL、id 全量比对、确认后销毁；重复点击返回 409 |
+| Claude Code 的 TodoWrite 与 [Agent SDK Skills](https://platform.claude.com/docs/en/agent-sdk/skills) | 多步任务显式列清单；长指令按需加载，常驻上下文只放摘要 | `ai/plan.py` + `update_plan`（SSE `plan` 事件）；`ai/playbooks.py` 6 份 SOP 按需 `load_playbook` |
+
+**取舍**：没有引入 LangGraph / OpenAI Agents SDK —— 它们会替换掉现有的 pydantic-ai
+工具层与 Casbin 权限包装，收益不足以抵消重写风险；本项目只取可独立落地的模式。
+也没有启用工具搜索（ToolSearch）：36 个工具尚在可控范围，且国内 OpenAI 兼容端点对
+provider 原生工具发现支持不一致，本地策略反而会引入额外往返。

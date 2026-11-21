@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy import select
 
@@ -38,6 +39,9 @@ from ..servers import provision
 from ..servers import tasks as task_service
 from ..servers.manager import manager
 from ..settings import settings
+from . import plan as plan_service
+from . import playbooks
+from .plan import StepIn
 
 log = logging.getLogger("nautilus.ai.tools")
 
@@ -58,6 +62,8 @@ class Ctx:
     ip: str = ""
     #: panel = 面板内置对话，mcp = 外部 agent 经 MCP 调用。
     source: str = "panel"
+    #: 会话 key（已按用户隔离）。任务清单按它存取，避免不同对话互相覆盖。
+    conversation_id: str = ""
 
 
 #: 没有默认值：忘了 set_ctx 就应当报错，而不是默默以 admin 身份跑。
@@ -103,6 +109,8 @@ class ToolSpec:
     perm: tuple[str, str] | None
     dangerous: bool
     mutates: bool
+    #: pydantic-ai 的工具超时；None 由 build_agent 按类别兜底。
+    timeout: float | None
 
 
 TOOLS: dict[str, ToolSpec] = {}
@@ -118,6 +126,7 @@ def tool(
     perm: tuple[str, str] | None = None,
     dangerous: bool = False,
     mutates: bool = False,
+    timeout: float | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """注册一个工具。
 
@@ -138,7 +147,7 @@ def tool(
                 return {"ok": False, "error": f"{exc}。当前身份 {who}，请让有权限的用户操作。"}
             except ToolError as exc:
                 return {"ok": False, "error": str(exc)}
-            except Exception as exc:  # noqa: BLE001 - 工具失败不该炸掉整轮对话
+            except Exception as exc:
                 log.exception("AI 工具 %s 执行失败", fn.__name__)
                 return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
@@ -157,6 +166,7 @@ def tool(
             perm=perm,
             dangerous=dangerous,
             mutates=mutates,
+            timeout=timeout,
         )
         return wrapper
 
@@ -681,3 +691,36 @@ async def panel_info() -> dict[str, Any]:
         "mcp_mode": address_cfg.mcp_mode,
         "mcp_address": f"{address_cfg.mcp_host}:{address_cfg.mcp_port}",
     }
+
+
+# ==========================================================================
+# Agent 自身能力：任务清单 + 运维手册
+# ==========================================================================
+@tool(perm=("server", "read"))
+async def list_playbooks() -> dict[str, Any]:
+    """列出内置的运维手册名称与一句话摘要。不确定多步任务的标准流程时先看这里，再用 load_playbook 取细节。"""
+    return {"playbooks": playbooks.catalogue(), "count": len(playbooks.PLAYBOOKS)}
+
+
+@tool(perm=("server", "read"))
+async def load_playbook(name: str) -> dict[str, Any]:
+    """按名称读取一份运维手册的完整步骤。name 用 list_playbooks 返回的名称，例如 install_plugin。"""
+    item = playbooks.get(name)
+    if item is None:
+        raise ToolError(f"没有名为 {name} 的手册，先用 list_playbooks 查名称")
+    return item
+
+
+@tool(perm=("server", "read"))
+async def update_plan(title: str, steps: list[dict[str, Any]]) -> dict[str, Any]:
+    """把当前任务拆成清单并标出进度。多步操作（安装、备份恢复、排查启动失败）开始时调用一次，每完成一步再更新一次。steps 是 [{"text": "步骤", "status": "pending|doing|done|blocked"}] 这样的数组。"""
+    if not steps:
+        raise ToolError("steps 不能为空；单步任务不需要清单")
+    try:
+        parsed = [StepIn.model_validate(item) for item in steps]
+    except Exception as exc:
+        raise ToolError(f"steps 格式不对：{exc}") from exc
+    ctx = current_ctx()
+    key = f"{ctx.username}:{ctx.conversation_id or 'default'}"
+    plan = plan_service.plans.set(key, title, parsed)
+    return {"plan": plan}
