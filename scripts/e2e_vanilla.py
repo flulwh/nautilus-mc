@@ -16,7 +16,9 @@ from functools import partial
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-DATA = ROOT / ".tmp" / "e2e-data"
+# Each run gets its own directory: no bulk deletion, and a failed run leaves
+# its evidence behind for inspection instead of being wiped by the next one.
+DATA = Path(os.environ.get("E2E_DATA") or (ROOT / ".tmp" / f"e2e-{int(time.time())}"))
 VERSION = os.environ.get("E2E_VERSION", "1.20.4")
 
 
@@ -25,8 +27,9 @@ def _print(*args, **kwargs):
 
 
 async def main() -> int:
-    shutil.rmtree(DATA, ignore_errors=True)
+    DATA.mkdir(parents=True, exist_ok=True)
     os.environ["NAUTILUS_DATA_DIR"] = str(DATA)
+    _print(f"data dir: {DATA}")
     os.environ["NAUTILUS_BOOTSTRAP_ADMIN_PASSWORD"] = "NautilusAdmin2026"
     os.environ["NAUTILUS_LOG_LEVEL"] = "info"
     os.environ["NAUTILUS_METRICS_INTERVAL"] = "2"
