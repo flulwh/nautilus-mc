@@ -159,8 +159,15 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
   对应 Claude Agent SDK 的 Skills 渐进披露与 Claude Code 的 TodoWrite 模式。
 - **能真正停下来**：浏览器上的「停止」会调 `POST /api/ai/cancel`，通过 pydantic-ai 的
   `CancellationToken` 取消 run 本身；已经完成的工具调用保留在对话里，不会重复执行。
-- **工具超时与历史压缩**：只读工具 60s、写操作 120s、安装/恢复 300s；发给模型的旧工具结果
-  压到 700 字符，最近 12 条原样保留（`ProcessHistory`），长对话不会把上下文撑爆。
+- **多会话**：左侧列出历史会话，可新建、切换、重命名、删除；切回去会把工具调用和回答一起还原。
+  每个会话按登录用户隔离，标题自动取第一句提问。
+- **上下文压缩**：发给模型的旧工具结果先压到 700 字符（`ProcessHistory`）；历史再长就自动
+  用同一个模型把旧轮次摘要化，从用户提问边界开始裁剪，最近 10 轮保持原文。也可以点
+  「压缩上下文」手动触发（`POST .../compact`，支持 focus）。压缩过程会发 SSE `compacted` 事件。
+- **工具超时**：只读工具 60s、写操作 120s、安装/恢复 300s，卡住不会拖死整轮。
+- **提示词反馈协议**：提示词要求模型每次调工具前先用一句话说明要做什么；配合前端的
+  状态机（就绪/连接中/生成中/出错）、逐条工具耗时与可展开结果、流式光标，不用猜它在干嘛。
+  每轮还会动态注入当前时间和操作者角色，只读账号会被明确提醒不能写。
 - **权限不旁路**：工具以**当前登录账号**的角色执行，走与 HTTP 路由同一套 Casbin 策略。
   AI 永远不会比调用它的人权限大；每次写操作都进审计日志（`ai.<tool_name>`）。
 - **危险操作要确认**：删世界、删插件、覆盖文件、恢复备份、强杀进程标记为 `dangerous`，
@@ -384,7 +391,11 @@ PUT    /api/ai/config                   # 改配置；api_key 传空串表示不
 POST   /api/ai/config/test              # 拿当前配置发一句 ping
 POST   /api/ai/models                   # 列出端点模型（/v1/models + Ollama /api/tags）
 GET    /api/ai/tools                    # 工具清单（含权限点、是否危险）
-POST   /api/ai/chat                     # SSE：text / plan / tool_call / tool_result / approval_required / cancelled / done
+GET    /api/ai/conversations            # 当前用户的会话列表（标题/预览/闲置时间）
+GET    /api/ai/conversations/{id}/messages  # 历史回放事件
+PATCH  /api/ai/conversations/{id}       # 重命名
+POST   /api/ai/conversations/{id}/compact   # 手动压缩（body 可带 focus）
+POST   /api/ai/chat                     # SSE：text / plan / tool_call / tool_result / approval_required / compacted / cancelled / done
 POST   /api/ai/approve                  # 批准或拒绝待确认的工具调用，并继续这一轮
 POST   /api/ai/cancel                   # 取消正在运行的对话（真停 agent run，不只是断流）
 GET    /api/audit                       # 审计日志
@@ -457,6 +468,9 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 | 前端 | React + Mantine + xterm + uPlot | 控制台与曲线是最吃性能的两块，直接用成熟组件 |
 | AI agent | `pydantic-ai` 2.71 | 模型往返、工具执行、流式增量、人工审批（`requires_approval`）都是现成的；本轮进一步用它的 `CancellationToken` / `ProcessHistory` / `tool_timeout` / `capture_run_messages` 做运行控制 |
 | 多步任务与手册 | Claude Code TodoWrite + Claude Agent SDK Skills | 清单显式化进度；手册只在需要时加载，避免把 36 个工具的细节全塞进 system prompt |
+| 多会话与命名 | Claude Code `--resume` / `/rename` | 会话像分支：不同任务分开，标题可改，切换时回放历史 |
+| 上下文压缩 | Claude Code `/compact <focus>` + LangGraph 摘要式记忆 | 先摘要旧轮次再裁剪，切点必须落在用户提问上；模型摘要失败有确定性兜底 |
+| 提示词与反馈 | pydantic-ai 动态 instructions + Vercel AI SDK 的 status 状态机 | 静态指令保持稳定前缀、运行时注入时间/角色；前端区分连接中/生成中/出错，工具调用有阶段和耗时 |
 | 审批中断语义 | LangGraph `interrupt()` / `Command(resume=...)` | 待确认调用一次性有效、带 TTL，过期或重复点击不再执行 |
 | 模型接入 | OpenAI 兼容协议 | 国内主流厂商与 Ollama 都遵守，一个 provider 通吃，不必按厂商分支 |
 | 模型发现 | Ollama `/api/tags` + OpenAI `/v1/models` | 通用接口拿名单，原生接口补参数量/量化；两种地址写法都能识别 |
@@ -484,7 +498,7 @@ nautilus/
 ├── auth/           # fastapi-users 集成（backend, router, schemas）
 ├── servers/        # 进程监管、jar 分发、指标采样、日志解析、RCON、cron 调度
 ├── resources/      # 配置文件读写、文件沙箱、插件市场、备份归档、玩家名单
-├── ai/             # AI 助手：配置(密钥加密) / 模型发现 / 工具层 / agent 装配 / 会话 / 计划 / 手册 / 运行控制
+├── ai/             # AI 助手：配置 / 模型发现 / 工具层 / agent 装配 / 会话 / 上下文压缩 / 计划 / 手册 / 运行控制
 ├── mcp_server.py   # MCP 服务端（python -m nautilus.mcp_server）
 ├── webui/dist/     # 构建后的前端
 ├── ws.py           # 控制台/事件 WebSocket

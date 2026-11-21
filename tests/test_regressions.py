@@ -360,3 +360,35 @@ async def test_crash_restart_backoff_resets_after_healthy_run():
     rt, scheduled = await crash(7003, uptime=5, restarts=mgr.AUTO_RESTART_MAX)
     assert not scheduled
     assert rt.restarts == mgr.AUTO_RESTART_MAX
+
+
+async def test_plugin_download_uses_servers_provision_module(tmp_path, monkeypatch):
+    """install_project 曾因 `from .provision import download` 报 ModuleNotFoundError。"""
+    from nautilus.resources import plugins
+    from nautilus.servers import provision
+
+    seen = {}
+
+    async def fake_download(url, target, *, expected_sha256=None, expected_sha1=None, progress=None):
+        seen.update({"url": url, "sha1": expected_sha1})
+        return target
+
+    monkeypatch.setattr(provision, "download", fake_download)
+    artifact = plugins.Artifact(url="https://example.com/x.jar", filename="x.jar", sha1="abc123")
+    target = tmp_path / "x.jar"
+    out = await plugins._download_verified(artifact, target)
+
+    assert out == target
+    assert seen == {"url": "https://example.com/x.jar", "sha1": "abc123"}
+
+
+async def test_plugin_download_rejects_missing_hash(tmp_path):
+    from nautilus.resources import plugins
+
+    artifact = plugins.Artifact(url="https://example.com/x.jar", filename="x.jar")
+    try:
+        await plugins._download_verified(artifact, tmp_path / "x.jar")
+    except plugins.PluginError:
+        pass
+    else:
+        raise AssertionError("没有哈希的下载源必须被拒绝")

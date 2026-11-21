@@ -573,3 +573,190 @@ def test_local_endpoint_needs_no_key():
         assert "API Key" in str(exc)
     else:
         raise AssertionError("https 远端缺密钥应当报错")
+
+
+# -------------------------------------------------------- sessions & context
+def test_session_metadata_and_serialization():
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+
+    from nautilus.ai.session import conversations, serialize
+
+    cid = conversations.new_id()
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="重启 1 号服")]),
+        ModelResponse(parts=[ToolCallPart("server_status", {"server_id": 1}, tool_call_id="c1")]),
+        ModelRequest(parts=[ToolReturnPart("server_status", {"ok": True, "running": False}, tool_call_id="c1")]),
+        ModelResponse(parts=[TextPart("查到了，1 号服当前是关的。")]),
+    ]
+    conversations.put(cid, history)
+    meta = conversations.meta(cid)
+    assert meta["title"] == "重启 1 号服"
+    assert meta["messages"] == 4
+
+    events = serialize(history)
+    assert events[0] == {"type": "user", "text": "重启 1 号服"}
+    assert events[1]["type"] == "tool_call" and events[1]["name"] == "server_status"
+    assert events[2]["type"] == "tool_result" and events[2]["failed"] is False
+    assert events[3] == {"type": "text", "text": "查到了，1 号服当前是关的。"}
+
+    assert conversations.set_title(cid, "改个名字") is True
+    assert conversations.meta(cid)["title"] == "改个名字"
+    assert conversations.set_title("missing", "x") is False
+    conversations.drop(cid)
+
+
+async def test_conversation_history_and_rename_endpoints(admin, monkeypatch):
+    await _enable_ai()
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _text_model("查好了"))
+    r = await admin.post("/api/ai/chat", json={"message": "列一下服务器"})
+    events = _events(r.text)
+    cid = next(e["conversation_id"] for e in events if e["type"] == "open")
+
+    r = await admin.get(f"/api/ai/conversations/{cid}/messages")
+    assert r.status_code == 200, r.text
+    assert r.json()["events"][0]["type"] == "user"
+    assert r.json()["meta"]["title"] == "列一下服务器"
+
+    r = await admin.patch(f"/api/ai/conversations/{cid}", json={"title": "运维排查"})
+    assert r.status_code == 200 and r.json()["title"] == "运维排查"
+    assert any(item["title"] == "运维排查" for item in (await admin.get("/api/ai/conversations")).json()["conversations"])
+
+    assert (await admin.get("/api/ai/conversations/nope/messages")).status_code == 404
+
+
+def test_compaction_boundaries_and_fallback(monkeypatch):
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        UserPromptPart,
+    )
+
+    from nautilus.ai import compaction
+
+    monkeypatch.setattr(compaction, "CONTEXT_MESSAGES", 6)
+    messages = []
+    for i in range(20):
+        messages.append(ModelRequest(parts=[UserPromptPart(content=f"问题{i}")]))
+        messages.append(ModelResponse(parts=[TextPart(f"回答{i}")]))
+    assert compaction.needs_compaction(messages) is True
+
+    cut = compaction.safe_cut(messages, keep=4)
+    assert cut > 0 and type(messages[cut]).__name__ == "ModelRequest"
+    assert any(getattr(p, "part_kind", "") == "user-prompt" for p in messages[cut].parts)
+
+    summary = compaction.fallback_summary(messages[:cut])
+    assert "用户" in summary and "助手" in summary
+
+    compacted = compaction.build_compacted(messages, cut, summary)
+    assert len(compacted) == len(messages) - cut + 2
+    assert compacted[0].parts[0].content.startswith(compaction.MARKER)
+    assert compacted[2:] == messages[cut:]
+
+    # 工具调用中间不能切
+    dangling = [*messages, ModelResponse(parts=[])]
+    assert compaction.safe_cut(dangling, keep=len(dangling)) == 0
+
+
+async def test_auto_compaction_emits_event(admin, monkeypatch):
+    from nautilus.ai import compaction
+
+    monkeypatch.setattr(compaction, "CONTEXT_MESSAGES", 6)
+    monkeypatch.setattr(compaction, "KEEP_RECENT", 2)
+    await _enable_ai()
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _text_model("摘要内容"))
+
+    cid = None
+    compacted_seen = False
+    for i in range(5):
+        body = {"message": f"第{i}个问题"}
+        if cid:
+            body["conversation_id"] = cid
+        r = await admin.post("/api/ai/chat", json=body)
+        events = _events(r.text)
+        cid = cid or next((e["conversation_id"] for e in events if e["type"] == "open"), None)
+        compacted_seen = compacted_seen or any(e["type"] == "compacted" for e in events)
+
+    assert compacted_seen, "历史超过阈值后应当发 compacted 事件"
+    r = await admin.get(f"/api/ai/conversations/{cid}/messages")
+    assert r.json()["meta"]["compactions"] == 1
+    assert any(e["type"] == "note" for e in r.json()["events"])
+
+
+async def test_manual_compact_respects_focus(admin, monkeypatch):
+    from nautilus.ai import compaction
+
+    monkeypatch.setattr(compaction, "CONTEXT_MESSAGES", 6)
+    monkeypatch.setattr(compaction, "KEEP_RECENT", 2)
+    await _enable_ai()
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _text_model("好的"))
+    captured = {}
+
+    async def fake(messages, cfg, *, focus="", force=False):
+        captured.update({"focus": focus, "force": force, "n": len(messages)})
+        return messages, {"compacted": True, "summary": "摘要", "saved_chars": 123, "dropped": 2, "model": False, "focus": focus}
+
+    monkeypatch.setattr(compaction, "compact", fake)
+    r = await admin.post("/api/ai/chat", json={"message": "记一件事"})
+    cid = next(e["conversation_id"] for e in _events(r.text) if e["type"] == "open")
+    r = await admin.post(f"/api/ai/conversations/{cid}/compact", json={"focus": "服务器配置"})
+    assert r.status_code == 200, r.text
+    assert r.json()["compacted"] is True
+    assert captured["focus"] == "服务器配置" and captured["force"] is True
+    assert (await admin.get(f"/api/ai/conversations/{cid}/messages")).json()["meta"]["compactions"] == 1
+
+
+def test_runtime_instructions_include_role_and_time():
+    from nautilus.ai.agent import runtime_instructions
+    from nautilus.ai.tools import Ctx
+
+    text = runtime_instructions(Ctx(username="ops", role="viewer"))
+    assert "ops" in text and "viewer" in text and "只读" in text
+    assert "当前时间" in text
+
+
+async def test_tool_install_project_full_chain(app, monkeypatch):
+    """用户报的 install_project 报错：确认工具到插件安装的整条链能跑通。"""
+    from nautilus.resources import plugins as plugin_service
+    from nautilus.servers import provision
+
+    async with session_scope() as s:
+        server = Server(name="ai-install-test", kind="paper", version="1.20.4", port=25031, rcon_port=25032)
+        s.add(server)
+        await s.commit()
+        await s.refresh(server)
+        server.directory.mkdir(parents=True, exist_ok=True)
+        server_id = server.id
+
+    async def fake_resolve(project, *, server=None, source="modrinth", version_id=""):
+        return plugin_service.Artifact(
+            url="https://example.com/x.jar",
+            filename="x.jar",
+            version="1.0",
+            project_id=project,
+            name=project,
+            sha1="abc123",
+            source=source,
+        )
+
+    async def fake_download(url, target, *, expected_sha256=None, expected_sha1=None, progress=None):
+        target.write_bytes(b"fake jar")
+        return target
+
+    monkeypatch.setattr(plugin_service, "resolve", fake_resolve)
+    monkeypatch.setattr(provision, "download", fake_download)
+
+    token = ai_tools.set_ctx(ai_tools.Ctx(role="admin", username="admin"))
+    try:
+        out = await ai_tools.TOOLS["install_project"].fn(server_id, "evkiwA7V")
+    finally:
+        ai_tools.reset_ctx(token)
+    assert out["ok"] is True, out
+    assert out["installed"]["filename"] == "x.jar"

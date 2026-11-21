@@ -91,6 +91,29 @@ body {
   border-radius: 2px;
 }
 
+/* 流式输出时跟在最后一个字后面的光标，不用动画库 */
+.chat-caret {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--dim);
+  animation: chat-blink 1s steps(2, start) infinite;
+}
+
+@keyframes chat-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-caret {
+    animation: none;
+  }
+}
+
 /* ---------------------------------------------------------- dashboard list */
 
 .stat-strip {

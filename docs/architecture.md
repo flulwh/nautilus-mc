@@ -70,9 +70,10 @@
 | 地址配置 | `addresses.py` | 面板对外地址（Host 推断兜底）、MCP 传输模式/监听地址，存 `settings_kv` | `load/save/public` |
 | AI 配置 | `ai/config.py` | 端点/模型/密钥配置，Fernet 加密后存 `settings_kv` | `load/save` |
 | AI 工具 | `ai/tools.py` | 把面板能力封装为 36 个工具：Casbin 权限、危险标记、超时、统一返回、写审计；不依赖 pydantic-ai / FastAPI | `TOOLS / catalogue()` |
-| AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、审批续跑、取消、工具超时、历史压缩、失败保留消息 | `stream_turn() / build_agent()` |
+| AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、审批续跑、取消、工具超时、运行时指令、自动压缩、失败保留消息 | `stream_turn() / build_agent() / runtime_instructions()` |
 | 模型发现 | `ai/discovery.py` | `/v1/models` 拿名单，本地端点再读 `/api/tags` 补体积/参数量/量化；合并去重、限响应体、失败给可操作提示 | `discover()` |
-| AI 会话 | `ai/session.py` | 进程内多轮历史，按用户提问裁剪 + TTL/LRU | `conversations` |
+| AI 会话 | `ai/session.py` | 进程内多轮历史 + 标题/摘要元数据，按用户提问裁剪 + TTL/LRU；历史可序列化回前端 | `conversations / serialize()` |
+| 上下文压缩 | `ai/compaction.py` | 超阈值时模型摘要旧轮次（失败则确定性兜底），在用户提问边界裁剪，保留最近 10 轮原文 | `compact() / needs_compaction()` |
 | 任务清单 | `ai/plan.py` | 按会话保存步骤与状态，模型通过 `update_plan` 更新，SSE `plan` 事件驱动前端 | `plans` |
 | 运维手册 | `ai/playbooks.py` | 6 份按需加载的 SOP；常驻上下文只留摘要 | `catalogue() / get()` |
 | 运行控制 | `ai/runs.py` | 每会话一个 `CancellationToken`，支持取消、重复运行保护、僵尸清理 | `runs` |
@@ -138,7 +139,8 @@ def register(app, hooks, bus):
 POST /api/ai/chat (SSE)
   → api/ai.py：校验 system:read / 模型配置，构造 Ctx(role, user_id, ip, source="panel")
   → ai/agent.py：build_agent() 用 OpenAI 兼容 provider 装配 pydantic-ai Agent
-  → agent.run_stream_events()
+  → ai/compaction.py：新提问时若历史超阈值 → 模型摘要旧轮次 + SSE compacted
+  → agent.run_stream_events()（instructions 注入时间/角色，静态提示词保持前缀稳定）
       PartDeltaEvent(TextPartDelta)   → SSE text
       FunctionToolCallEvent           → SSE tool_call
       DeferredToolRequestsEvent       → SSE approval_required（dangerous 且未开自动确认）
@@ -210,6 +212,10 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | POST | `/api/ai/config/test` | `system:manage` |
 | POST | `/api/ai/models` | `system:manage` |
 | GET | `/api/ai/tools` | `system:read` |
+| GET | `/api/ai/conversations` | `system:read` |
+| GET | `/api/ai/conversations/{id}/messages` | `system:read` |
+| PATCH | `/api/ai/conversations/{id}` | `system:read` |
+| POST | `/api/ai/conversations/{id}/compact` | `system:manage` |
 | POST | `/api/ai/chat` | `system:read`（SSE 流式） |
 | POST | `/api/ai/approve` | `system:read` |
 | POST | `/api/ai/cancel` | `server:read` |

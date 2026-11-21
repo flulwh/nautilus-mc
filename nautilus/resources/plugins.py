@@ -323,7 +323,9 @@ async def resolve(project: str, *, server: Server, source: str = "modrinth", ver
 
 
 async def _download_verified(artifact: Artifact, target: Path) -> Path:
-    from .provision import download
+    # download 在 servers/provision.py，不在 resources 包里；这里曾写错成相对导入，
+    # 导致 install_project 运行时报 ModuleNotFoundError。
+    from ..servers.provision import download
 
     if not (artifact.sha1 or artifact.sha512 or artifact.sha256):
         raise PluginError("下载源未提供哈希，拒绝安装（防投毒）")
@@ -478,13 +480,13 @@ async def check_updates(server: Server) -> list[dict]:
             return None
         try:
             found = await search(item["name"], server=server, limit=1)
-        except Exception:
+        except Exception:  # noqa: BLE001 - 检查更新是 best effort，单个插件失败不该拖垮整批
             return None
         if not found:
             return None
         try:
             latest = await versions(found[0]["id"], server=server, limit=1)
-        except Exception:
+        except Exception:  # noqa: BLE001 - 同上
             return None
         if not latest:
             return None

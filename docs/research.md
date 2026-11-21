@@ -307,3 +307,41 @@ provider，直接从服务端拉取可选模型。
 **取舍**：没有为 Ollama 单独接 `ollama` Python SDK —— 现有 provider 已经是 OpenAI 协议，
 再加一个 SDK 只会多一套依赖和鉴权分支；模型发现只需要两个 GET，直接走 `httpx` 更轻。
 也没有把模型列表缓存下来：本地模型随时可能 `ollama pull`，每次点按钮现取才不会选到过期名字。
+
+---
+
+## 10. 多会话、上下文压缩与反馈感（2026-11-22）
+
+用户提出四件事：多会话、上下文压缩、提示词优化、前端反馈。上游对照如下。
+
+| 上游资料 | 确认到的做法 | 本项目落地 |
+|---|---|---|
+| [Anthropic: Best practices for Claude Code](https://www.anthropic.com/engineering/claude-code-best-practices) | `--resume` / `--rename` 把会话当分支；`/compact <focus>` 可指定压缩重点；`/clear` 换任务 | 会话侧栏支持新建/切换/重命名/删除；`POST .../compact` 带 focus；新对话按钮相当于 `/clear` |
+| [Claude Code 上下文窗口说明](https://github.com/estasney/myclaudecode/blob/master/my-claude-code/skills/claude-code-mastery/references/upstream/context-window.md) | 压缩后系统等仍重新注入，只摘要历史；保留最近修改过的文件/关键决策 | 静态 instructions 每轮照常发送，只摘要旧轮次；摘要里强制保留服务器 id、路径、插件 slug、未完成步骤 |
+| [LangGraph 短时记忆](https://python.langchain.com/docs/modules/memory/chat_messages/) 与 [Memory 概念](https://github.com/gbaian10/langgraph/blob/780285ef916883382856c88c79d49c5a7a0060d7/docs/docs/concepts/memory.md) | 先摘要再裁剪；`start_on='human'` 保证历史以用户消息开头，工具返回必须跟在对应调用后 | `safe_cut()` 只切在用户提问开头；摘要作为完整 user/assistant 一对放回，后面接最近 10 轮原文 |
+| [pydantic-ai Agents](https://pydantic.dev/docs/ai/core-concepts/agents/) | 静态 instructions 排前面利于缓存，动态/运行时指令每次重新计算；指令属于操作者权限 | 静态提示词保持前缀稳定；每轮用 run 级 `instructions` 注入时间、操作者角色，viewer 明确限制只读 |
+| [Vercel AI SDK useChat](https://sdk.vercel.ai/docs/ai-sdk-ui/generative-user-interfaces) | `status` 四态机（ready/submitted/streaming/error）驱动感知质量；工具部件按 state 渲染；消息用 parts 而不是整段字符串 | 前端按 ready/连接中/生成中/出错/已停止显示状态；工具区分执行中/待确认/完成/失败并显示耗时；历史用事件序列回放 |
+
+**取舍**：没有引入 LangGraph/Vercel AI SDK —— 它们会替换现有 pydantic-ai 工具层与 SSE
+协议，收益不足以抵消重写风险；只取可独立落地的模式。压缩没有固定接 tiktoken：
+按字符估算即可触发，避免为一个面板再背一份分词器；模型摘要失败时用确定性摘要兜底，
+不让一次网络抖动把会话拖死。会话仍只在进程内（重启丢失），这与原有设计一致。
+
+---
+
+## 10. 多会话、上下文压缩与反馈感（2026-11-22）
+
+用户提出四件事：多会话、上下文压缩、提示词优化、前端反馈。上游对照如下。
+
+| 上游资料 | 确认到的做法 | 本项目落地 |
+|---|---|---|
+| [Anthropic: Best practices for Claude Code](https://www.anthropic.com/engineering/claude-code-best-practices) | `--resume` / `--rename` 把会话当分支；`/compact <focus>` 可指定压缩重点；`/clear` 换任务 | 会话侧栏支持新建/切换/重命名/删除；`POST .../compact` 带 focus；新对话按钮相当于 `/clear` |
+| [Claude Code 上下文窗口说明](https://github.com/estasney/myclaudecode/blob/master/my-claude-code/skills/claude-code-mastery/references/upstream/context-window.md) | 压缩后系统等仍重新注入，只摘要历史；保留最近修改过的文件/关键决策 | 静态 instructions 每轮照常发送，只摘要旧轮次；摘要里强制保留服务器 id、路径、插件 slug、未完成步骤 |
+| [LangGraph 短时记忆](https://python.langchain.com/docs/modules/memory/chat_messages/) 与 [Memory 概念](https://github.com/gbaian10/langgraph/blob/780285ef916883382856c88c79d49c5a7a0060d7/docs/docs/concepts/memory.md) | 先摘要再裁剪；`start_on='human'` 保证历史以用户消息开头，工具返回必须跟在对应调用后 | `safe_cut()` 只切在用户提问开头；摘要作为完整 user/assistant 一对放回，后面接最近 10 轮原文 |
+| [pydantic-ai Agents](https://pydantic.dev/docs/ai/core-concepts/agents/) | 静态 instructions 排前面利于缓存，动态/运行时指令每次重新计算；指令属于操作者权限 | 静态提示词保持前缀稳定；每轮用 run 级 `instructions` 注入时间、操作者角色，viewer 明确限制只读 |
+| [Vercel AI SDK useChat](https://sdk.vercel.ai/docs/ai-sdk-ui/generative-user-interfaces) | `status` 四态机（ready/submitted/streaming/error）驱动感知质量；工具部件按 state 渲染；消息用 parts 而不是整段字符串 | 前端按 ready/连接中/生成中/出错/已停止显示状态；工具区分执行中/待确认/完成/失败并显示耗时；历史用事件序列回放 |
+
+**取舍**：没有引入 LangGraph/Vercel AI SDK —— 它们会替换现有 pydantic-ai 工具层与 SSE
+协议，收益不足以抵消重写风险；只取可独立落地的模式。压缩没有固定接 tiktoken：
+按字符估算即可触发，避免为一个面板再背一份分词器；模型摘要失败时用确定性摘要兜底，
+不让一次网络抖动把会话拖死。会话仍只在进程内（重启丢失），这与原有设计一致。

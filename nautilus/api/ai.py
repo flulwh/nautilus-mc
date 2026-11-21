@@ -61,6 +61,15 @@ class CancelIn(BaseModel):
     conversation_id: str = Field(min_length=1, max_length=32)
 
 
+class RenameIn(BaseModel):
+    title: str = Field(min_length=1, max_length=28)
+
+
+class CompactIn(BaseModel):
+    #: 用户可指定压缩重点，Claude Code 的 `/compact <focus>` 模式。
+    focus: str = Field(default="", max_length=200)
+
+
 def _key(user: User, conversation_id: str) -> str:
     """会话按用户隔离：id 前缀就是用户 id，别人的 id 拼不出你的 key。"""
     return f"{user.id}:{conversation_id}"
@@ -260,6 +269,57 @@ async def list_conversations(user: UserDep) -> dict[str, Any]:
     for item in items:
         item["id"] = item["id"][len(prefix) :]
     return {"conversations": items}
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    dependencies=[Depends(require("system", "read"))],
+)
+async def conversation_messages(conversation_id: str, user: UserDep) -> dict[str, Any]:
+    """切回旧会话时把历史还原成前端可回放的事件序列。"""
+    from ..ai.session import serialize
+
+    key = _key(user, conversation_id)
+    messages = conversations.get(key)
+    if messages is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已过期")
+    return {"events": serialize(messages), "meta": conversations.meta(key)}
+
+
+@router.patch("/conversations/{conversation_id}", dependencies=[Depends(require("system", "read"))])
+async def rename_conversation(conversation_id: str, payload: RenameIn, user: UserDep) -> dict[str, Any]:
+    key = _key(user, conversation_id)
+    if not conversations.set_title(key, payload.title):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已过期")
+    return {"ok": True, "title": payload.title.strip()}
+
+
+@router.post(
+    "/conversations/{conversation_id}/compact",
+    dependencies=[Depends(require("system", "manage"))],
+)
+async def compact_conversation(
+    conversation_id: str,
+    payload: CompactIn,
+    session: SessionDep,
+    user: UserDep,
+) -> dict[str, Any]:
+    """手动压缩（对齐 `/compact <focus>`），自动压缩在每轮开始时也会做。"""
+    from ..ai import compaction
+
+    cfg = await ai_config.load(session)
+    key = _key(user, conversation_id)
+    messages = conversations.get(key)
+    if messages is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已过期")
+    if run_store.runs.active(key):
+        raise HTTPException(status.HTTP_409_CONFLICT, "这一轮还在运行，先点停止再压缩")
+    new_messages, info = await compaction.compact(messages, cfg, focus=payload.focus, force=True)
+    if not info["compacted"]:
+        return {"ok": True, "compacted": False, "reason": "会话太短，无需压缩"}
+    old_count = (conversations.meta(key) or {}).get("compactions", 0)
+    conversations.put(key, new_messages, summary=info["summary"], compactions=old_count + 1)
+    return {"ok": True, **info}
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204, dependencies=[Depends(require("server", "read"))])
