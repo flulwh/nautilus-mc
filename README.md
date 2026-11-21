@@ -143,6 +143,38 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 `pluggy`（pytest 的插件引擎）提供 6 个钩子：`nautilus_startup` / `nautilus_routes` / `server_starting` / `server_started` /
 `server_exited` / `console_line`。任一扩展抛异常只记日志，不会拖垮面板。
 
+### 12. AI 助手
+用自然语言操纵面板：启停服务器、发控制台命令、读写文件与配置、装插件、做备份、切世界、管玩家，
+共 **33 个工具**，覆盖上面所有能力。
+
+- **接哪家模型**：任何 OpenAI 兼容端点（DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI / 本地 Ollama），
+  在「系统设置 -> AI 助手」填 `base_url` + `model` + `api_key` 即可，带「测试连接」按钮。
+- **agent 循环**：用 [Pydantic AI](https://github.com/pydantic/pydantic-ai)（Pydantic 官方，MIT），
+  不自己写 tool-calling 状态机；工具声明为普通 async 函数，schema 由签名生成。
+- **权限不旁路**：工具以**当前登录账号**的角色执行，走与 HTTP 路由同一套 Casbin 策略。
+  AI 永远不会比调用它的人权限大；每次写操作都进审计日志（`ai.<tool_name>`）。
+- **危险操作要确认**：删世界、删插件、覆盖文件、恢复备份、强杀进程标记为 `dangerous`，
+  默认停下来等你在界面上点「确认执行」；可以在设置里关掉确认。
+- **流式输出**：`POST /api/ai/chat` 返回 SSE，前端实时看到文字增量、每次工具调用与结果。
+- **也能被外部 agent 驱动**：`python -m nautilus.mcp_server` 起一个 MCP server，把同一批工具
+  暴露给 Claude Desktop / Cursor 等 —— 与面板内置对话共享权限模型与审计。
+
+```bash
+# 外部 MCP 客户端配置（stdio）
+{
+  "mcpServers": {
+    "nautilus": {
+      "command": "C:/path/to/nautilus-mc/.venv/Scripts/python.exe",
+      "args": ["-m", "nautilus.mcp_server"],
+      "env": {"NAUTILUS_DATA_DIR": "C:/path/to/nautilus-mc/data"}
+    }
+  }
+}
+```
+
+API Key 用 Fernet 加密后存库（密钥由 `NAUTILUS_SECRET_KEY` / `<data>/.secret` 派生），
+接口只回显尾号；换过 `secret_key` 之后旧密文解不开，需要重新填一次。
+
 ---
 
 ## 架构
@@ -330,6 +362,12 @@ GET    /api/servers/{id}/files?path=    # 沙箱目录浏览
 GET/PUT /api/servers/{id}/config/{path} # 结构化读写 + backups/restore/raw
 GET    /api/servers/{id}/plugins/search # Modrinth / Hangar 聚合搜索
 POST   /api/servers/{id}/plugins/install
+GET    /api/ai/config                   # 模型配置（API Key 只回显尾号）
+PUT    /api/ai/config                   # 改配置；api_key 传空串表示不修改
+POST   /api/ai/config/test              # 拿当前配置发一句 ping
+GET    /api/ai/tools                    # 工具清单（含权限点、是否危险）
+POST   /api/ai/chat                     # SSE：text / tool_call / tool_result / approval_required / done
+POST   /api/ai/approve                  # 批准或拒绝待确认的工具调用，并继续这一轮
 GET    /api/audit                       # 审计日志
 ```
 
@@ -398,6 +436,9 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 | 插件市场 | Modrinth API / Hangar API | 覆盖 99% 生态，且提供哈希 |
 | 扩展机制 | `pluggy` | pytest 同款，语义稳定 |
 | 前端 | React + Mantine + xterm + uPlot | 控制台与曲线是最吃性能的两块，直接用成熟组件 |
+| AI agent | `pydantic-ai` | 模型往返、工具执行、流式增量、人工审批（`requires_approval`）都是现成的；与本站同为 Pydantic 技术栈，工具就是带类型标注的普通函数 |
+| 模型接入 | OpenAI 兼容协议 | 国内主流厂商与 Ollama 都遵守，一个 provider 通吃，不必按厂商分支 |
+| MCP | 官方 `mcp` SDK | 让 Claude Desktop / Cursor 等外部 agent 复用同一批工具 |
 
 ---
 
@@ -421,6 +462,8 @@ nautilus/
 ├── auth/           # fastapi-users 集成（backend, router, schemas）
 ├── servers/        # 进程监管、jar 分发、指标采样、日志解析、RCON、cron 调度
 ├── resources/      # 配置文件读写、文件沙箱、插件市场、备份归档、玩家名单
+├── ai/             # AI 助手：配置(密钥加密) / 工具层 / agent 装配 / 会话
+├── mcp_server.py   # MCP 服务端（python -m nautilus.mcp_server）
 ├── webui/dist/     # 构建后的前端
 ├── ws.py           # 控制台/事件 WebSocket
 ├── authz.py        # Casbin 封装
@@ -432,7 +475,7 @@ migrations/         # Alembic
 deploy/             # Dockerfile / compose / systemd / env 样例
 docs/               # 调研与架构文档、截图
 tests/              # pytest
-scripts/            # 真机 E2E
+scripts/            # 真机 E2E、本地 mock 模型
 start.py            # 一键启动逻辑（建 venv / 装依赖 / 引导管理员 / 开浏览器）
 start.bat start.sh  # Windows 与 Linux/macOS 的薄入口
 ```

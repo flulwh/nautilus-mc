@@ -183,3 +183,24 @@ export interface UserRow {
   created_at: string | null;
   last_login_at: string | null;
 }
+
+export interface AiConfig {
+  enabled: boolean;
+  base_url: string;
+  model: string;
+  api_key: string;
+  api_key_masked: string;
+  has_key: boolean;
+  configured: boolean;
+  max_steps: number;
+  auto_approve: boolean;
+  presets: { label: string; base_url: string; model: string }[];
+}
+
+export interface AiTool {
+  name: string;
+  summary: string;
+  dangerous: boolean;
+  mutates: boolean;
+  perm: string;
+}

@@ -22,8 +22,12 @@
 │  Interface      api/*.py  routers · ws.py · deps.py       │
 │                 (只做参数校验、鉴权、编排，不含业务逻辑)      │
 ├─────────────────────────────────────────────────────────┤
+│  AI             ai/(agent,session,config) · mcp_server    │
+│                 (agent 循环、流式事件、人工审批、MCP 适配)  │
+├─────────────────────────────────────────────────────────┤
 │  Domain         servers/(manager,rcon,logbus,metrics,     │
 │                 provision) · configs/ · plugins/          │
+│                 ai/tools.py（能力工具化，与上面共用）        │
 ├─────────────────────────────────────────────────────────┤
 │  Platform       authz( casbin ) · security(argon2/jwt)    │
 │                 events( pub/sub ) · extensions( hooks )   │
@@ -33,7 +37,8 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-依赖方向严格单向：`Interface → Domain → Platform → Infra`。Domain 不 import Interface，Platform 不 import Domain。
+依赖方向严格单向：`Interface → AI → Domain → Platform → Infra`。Domain 不 import Interface，Platform 不 import Domain。
+`ai/tools.py` 是唯一例外：它属于 Domain，但会读 authz / audit 这两个 Platform 能力——和 HTTP 路由的鉴权方式完全一致。
 
 ## 3. 模块划分与职责
 
@@ -61,6 +66,11 @@
 | 通知 | `notify.py` | Webhook 投递（Discord embed / 扁平 JSON）、事件订阅、频率抑制 | `notify.emit(event, ...)` |
 | 定时 | `servers/tasks.py` | APScheduler cron 维护任务（重启/备份/指令） | `run_task(id)` |
 | 审计 | `audit.py` | 所有写操作的不可变记录 | `audit.record(...)` |
+| AI 配置 | `ai/config.py` | 端点/模型/密钥配置，Fernet 加密后存 `settings_kv` | `load/save` |
+| AI 工具 | `ai/tools.py` | 把面板能力封装为 33 个工具：Casbin 权限、危险标记、统一返回、写审计；不依赖 pydantic-ai / FastAPI | `TOOLS / catalogue()` |
+| AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、人工审批后续跑 | `stream_turn()` |
+| AI 会话 | `ai/session.py` | 进程内多轮历史，按用户提问裁剪 + TTL/LRU | `conversations` |
+| MCP | `mcp_server.py` | 官方 `mcp` SDK，stdio / streamable-http，复用同一批工具 | `python -m nautilus.mcp_server` |
 
 ## 4. 关键流程
 
@@ -115,6 +125,29 @@ def register(app, hooks, bus):
 ```
 启动时扫描 entry points，失败只记 warning，不影响主进程（扩展不能拖垮面板）。
 
+### 4.5 AI 助手的一次工具调用
+
+```
+POST /api/ai/chat (SSE)
+  → api/ai.py：校验 system:read / 模型配置，构造 Ctx(role, user_id, ip, source="panel")
+  → ai/agent.py：build_agent() 用 OpenAI 兼容 provider 装配 pydantic-ai Agent
+  → agent.run_stream_events()
+      PartDeltaEvent(TextPartDelta)   → SSE text
+      FunctionToolCallEvent           → SSE tool_call
+      DeferredToolRequestsEvent       → SSE approval_required（dangerous 且未开自动确认）
+      FunctionToolResultEvent         → SSE tool_result
+      AgentRunResultEvent             → SSE done（usage / pending）
+  → ai/tools.py 包装器：_require(obj, act) → 真实服务函数 → audit.record("ai.<tool>")
+```
+
+确认续跑：`POST /api/ai/approve` 带 `{call_id: bool}` 回到 `stream_turn()`，
+以 `DeferredToolResults` 恢复这一轮。**恢复时不能再传用户 prompt**，否则
+pydantic-ai 会报 unprocessed tool calls；所以确认接口只接审批结果。
+
+外部 agent：`python -m nautilus.mcp_server` 把 `tools.TOOLS` 原样注册为 MCP 工具，
+身份取自启动进程的环境变量 `NAUTILUS_MCP_ROLE` / `NAUTILUS_MCP_USER`，
+与面板内置对话共用同一套权限与审计，不存在「MCP 这条路更宽松」。
+
 ## 5. 数据模型
 
 ```
@@ -150,6 +183,11 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | GET/PUT | `/api/system/java` | `system:read` / `system:manage` |
 | GET/PUT | `/api/system/webhooks` | `system:read` / `system:manage` |
 | GET/POST | `/api/tokens` | 已登录（仅本人令牌） |
+| GET/PUT | `/api/ai/config` | `system:read` / `system:manage` |
+| POST | `/api/ai/config/test` | `system:manage` |
+| GET | `/api/ai/tools` | `system:read` |
+| POST | `/api/ai/chat` | `system:read`（SSE 流式） |
+| POST | `/api/ai/approve` | `system:read` |
 | GET | `/api/servers/{id}/plugins/search?q=` | `server:plugins` |
 | POST | `/api/servers/{id}/plugins/install` | `server:plugins` |
 | GET | `/api/servers/{id}/metrics?window=300` | `server:read` |
@@ -176,6 +214,11 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | 指令注入 | 控制台指令走 RCON（不经 shell）；`start` 参数为列表，`shell=False` |
 | 上传 | 大小上限 + 扩展名白名单 + 覆盖需确认 |
 | 审计 | 谁、何时、从哪、做了什么、结果，全量落库，只读接口 |
+| 模型密钥 | Fernet 加密后存 `settings_kv`，密钥由 `secret_key` 派生；接口只回掩码，换密钥后旧密文失效而非崩溃 |
+| AI 越权 | 每个工具声明 `(obj, act)`，执行前以**当前用户角色**过 Casbin；AI 永远不会比调用者权限大 |
+| 危险操作 | 删除/覆盖/强杀等工具标记 `dangerous`，未开自动确认时用 `DeferredToolRequests` 停下来等人点头，按 `call_id` 绑定结果 |
+| 上下文膨胀 | 单个工具返回上限 24k 字符；模型往返步数上限 `max_steps`（1~40） |
+| MCP 暴露 | 复用同一批工具与审计；默认 stdio，`--http` 时只监听 127.0.0.1，身份由启动环境变量决定 |
 
 ## 8. 部署形态
 

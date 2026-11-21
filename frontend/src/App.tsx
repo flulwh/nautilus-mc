@@ -20,6 +20,7 @@ import {
   IconDashboard,
   IconLogout,
   IconMoon,
+  IconRobot,
   IconServer2,
   IconShieldLock,
   IconSun,
@@ -30,6 +31,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { api, ApiError } from "./api";
+import { AssistantPage } from "./pages/Assistant";
 import { AuditPage } from "./pages/Audit";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
@@ -179,6 +181,12 @@ export function App() {
             label="服务器"
             active={location.pathname.startsWith("/servers")}
           />
+          <NavLink
+            to="/assistant"
+            icon={<IconRobot size={14} />}
+            label="AI 助手"
+            active={location.pathname === "/assistant"}
+          />
           <div className="section-label">治理</div>
           {canAudit && (
             <NavLink to="/audit" icon={<IconActivity size={14} />} label="审计日志" active={location.pathname === "/audit"} />
@@ -221,6 +229,7 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/servers" element={<Navigate to="/" replace />} />
           <Route path="/servers/:id" element={<ServerDetail />} />
+          <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/audit" element={canAudit ? <AuditPage /> : <Navigate to="/" replace />} />
           <Route path="/users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
           <Route path="/settings" element={isAdmin ? <SystemPage /> : <Navigate to="/" replace />} />

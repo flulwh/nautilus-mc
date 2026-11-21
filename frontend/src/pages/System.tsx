@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, ApiError } from "../api";
+import { AiSettings } from "./AiSettings";
 import type { Me } from "../types";
 import { useSocket } from "../useSocket";
 
@@ -467,6 +468,10 @@ export function SystemPage() {
             </Text>
           </Group>
         </Card>
+      </Grid.Col>
+
+      <Grid.Col span={12}>
+        <AiSettings canManage={canManage} />
       </Grid.Col>
     </Grid>
   );
