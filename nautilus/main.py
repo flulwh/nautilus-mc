@@ -19,7 +19,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from .api import configs, files, plugins, servers, system
+from .api import backups, configs, files, players, plugins, servers, system, tasks
 from .auth import router as auth_router
 from .auth.backend import auth_backend, fastapi_users, get_user_manager  # noqa: F401  (re-export)
 from .authz import authz
@@ -27,6 +27,7 @@ from .db import SessionFactory, autostart_servers, init_db
 from .events import bus
 from .extensions import collected_routers, emit, load_extensions
 from .servers import metrics as metrics_svc
+from .servers import tasks as task_svc
 from .servers.manager import manager
 from .settings import settings
 from .ws import router as ws_router
@@ -46,6 +47,8 @@ async def lifespan(app: FastAPI):
     await authz.reload_from_db()
     load_extensions()
     metrics_svc.start()
+    task_svc.start()
+    await task_svc.sync_all()
     emit("nautilus_startup", app=app, bus=bus)
 
     for server in await autostart_servers():
@@ -59,6 +62,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        task_svc.shutdown()
         metrics_svc.shutdown()
         await manager.shutdown()
         from .resources import plugins as plugin_svc
@@ -121,6 +125,9 @@ def create_app() -> FastAPI:
     app.include_router(files.router, prefix=api_prefix)
     app.include_router(configs.router, prefix=api_prefix)
     app.include_router(plugins.router, prefix=api_prefix)
+    app.include_router(players.router, prefix=api_prefix)
+    app.include_router(backups.router, prefix=api_prefix)
+    app.include_router(tasks.router, prefix=api_prefix)
     app.include_router(system.router, prefix=api_prefix)
     app.include_router(system.audit_router, prefix=api_prefix)
 

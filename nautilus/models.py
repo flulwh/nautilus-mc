@@ -23,6 +23,20 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def iso_utc(value: datetime | None) -> str | None:
+    """Serialise a DB timestamp as an explicit UTC instant.
+
+    SQLite has no timezone type, so values come back naive even though they were
+    written as UTC. Emitting them without an offset makes browsers read them as
+    *local* time - an 8-hour skew in CST. Attaching UTC restores the truth.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -50,8 +64,8 @@ class User(SQLAlchemyBaseUserTable[int], Base):
             "role": self.role,
             "is_active": self.is_active,
             "is_superuser": self.is_superuser,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
+            "created_at": iso_utc(self.created_at),
+            "last_login_at": iso_utc(self.last_login_at),
         }
 
 
@@ -101,7 +115,7 @@ class Server(Base):
             "auto_start": self.auto_start,
             "auto_restart": self.auto_restart,
             "eula_accepted": self.eula_accepted,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": iso_utc(self.created_at),
         }
 
 
@@ -141,7 +155,7 @@ class PluginRecord(Base):
             "name": self.name,
             "version": self.version,
             "filename": self.filename,
-            "installed_at": self.installed_at.isoformat() if self.installed_at else None,
+            "installed_at": iso_utc(self.installed_at),
         }
 
 
@@ -169,3 +183,36 @@ class SettingKV(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[Any] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ScheduledTask(Base):
+    """Cron-driven maintenance job bound to one server (restart/backup/command)."""
+
+    __tablename__ = "scheduled_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    kind: Mapped[str] = mapped_column(String(24), default="command")
+    cron: Mapped[str] = mapped_column(String(64), default="0 4 * * *")
+    payload: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str] = mapped_column(String(16), default="")
+    last_result: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "server_id": self.server_id,
+            "name": self.name,
+            "kind": self.kind,
+            "cron": self.cron,
+            "payload": self.payload,
+            "enabled": self.enabled,
+            "last_run": iso_utc(self.last_run),
+            "last_status": self.last_status,
+            "last_result": self.last_result,
+            "created_at": iso_utc(self.created_at),
+        }

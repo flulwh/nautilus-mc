@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     metrics_interval: float = 3.0
     metrics_points: int = 600
     stop_grace_seconds: int = 30
+    #: How many whole-server archives to keep per server (oldest pruned first).
+    backup_keep: int = 10
+    #: IANA name used to interpret scheduled task cron expressions.
+    timezone: str = "Asia/Shanghai"
     log_level: str = "info"
     serve_frontend: bool = True
 

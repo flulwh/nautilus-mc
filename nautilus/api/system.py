@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from ..authz import ACTIONS, OBJECTS, ROLES, authz
 from ..deps import SessionDep, require
 from ..extensions import pm
-from ..models import AuditLog, Server, User
+from ..models import iso_utc, AuditLog, Server, User
 from ..settings import settings
 
 router = APIRouter(tags=["system"])
@@ -40,7 +40,7 @@ async def list_audit(
         "entries": [
             {
                 "id": r.id,
-                "ts": r.ts.isoformat() if r.ts else None,
+                "ts": iso_utc(r.ts),
                 "actor": r.actor,
                 "action": r.action,
                 "target": r.target,

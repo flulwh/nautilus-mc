@@ -43,7 +43,7 @@ def _sqlite_pragmas(dbapi_conn, _record):  # pragma: no cover - driver level
 DEFAULT_POLICIES: list[tuple[str, str, str, str]] = [
     # p, subject, object, action(regex)
     ("p", "admin", "*", ".*"),
-    ("p", "operator", "server", "read|control|console|files|config|plugins|create|install"),
+    ("p", "operator", "server", "read|control|console|files|config|plugins|create|install|backup|players|tasks"),
     ("p", "operator", "audit", "read"),
     ("p", "moderator", "server", "read|console"),
     ("p", "viewer", "server", "read"),

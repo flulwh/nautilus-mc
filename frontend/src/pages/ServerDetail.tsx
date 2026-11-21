@@ -14,7 +14,9 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
+  IconArchive,
   IconArrowLeft,
+  IconCalendarTime,
   IconChartAreaLine,
   IconDeviceFloppy,
   IconFolder,
@@ -40,6 +42,9 @@ const FilesTab = lazy(() => import("./tabs/FilesTab").then((m) => ({ default: m.
 const ConfigTab = lazy(() => import("./tabs/ConfigTab").then((m) => ({ default: m.ConfigTab })));
 const PluginsTab = lazy(() => import("./tabs/PluginsTab").then((m) => ({ default: m.PluginsTab })));
 const MetricsTab = lazy(() => import("./tabs/MetricsTab").then((m) => ({ default: m.MetricsTab })));
+const BackupsTab = lazy(() => import("./tabs/BackupsTab").then((m) => ({ default: m.BackupsTab })));
+const PlayersTab = lazy(() => import("./tabs/PlayersTab").then((m) => ({ default: m.PlayersTab })));
+const TasksTab = lazy(() => import("./tabs/TasksTab").then((m) => ({ default: m.TasksTab })));
 const SettingsTab = lazy(() => import("./tabs/SettingsTab").then((m) => ({ default: m.SettingsTab })));
 
 function TabFallback() {
@@ -212,6 +217,9 @@ export function ServerDetail() {
           <Tabs.Tab value="console" leftSection={<IconTerminal2 size={14} />}>
             控制台
           </Tabs.Tab>
+          <Tabs.Tab value="players" leftSection={<IconUsers size={14} />}>
+            玩家
+          </Tabs.Tab>
           <Tabs.Tab value="files" leftSection={<IconFolder size={14} />}>
             文件
           </Tabs.Tab>
@@ -220,6 +228,12 @@ export function ServerDetail() {
           </Tabs.Tab>
           <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={14} />}>
             插件
+          </Tabs.Tab>
+          <Tabs.Tab value="backups" leftSection={<IconArchive size={14} />}>
+            备份
+          </Tabs.Tab>
+          <Tabs.Tab value="tasks" leftSection={<IconCalendarTime size={14} />}>
+            任务
           </Tabs.Tab>
           <Tabs.Tab value="metrics" leftSection={<IconChartAreaLine size={14} />}>
             监控
@@ -232,6 +246,11 @@ export function ServerDetail() {
         <Tabs.Panel value="console" pt="md">
           <Suspense fallback={<TabFallback />}>
             <ConsoleTab serverId={serverId} canSend={can("console")} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="players" pt="md">
+          <Suspense fallback={<TabFallback />}>
+            <PlayersTab serverId={serverId} />
           </Suspense>
         </Tabs.Panel>
         <Tabs.Panel value="files" pt="md">
@@ -247,6 +266,16 @@ export function ServerDetail() {
         <Tabs.Panel value="plugins" pt="md">
           <Suspense fallback={<TabFallback />}>
               <PluginsTab serverId={serverId} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="backups" pt="md">
+          <Suspense fallback={<TabFallback />}>
+            <BackupsTab serverId={serverId} />
+          </Suspense>
+        </Tabs.Panel>
+        <Tabs.Panel value="tasks" pt="md">
+          <Suspense fallback={<TabFallback />}>
+            <TasksTab serverId={serverId} />
           </Suspense>
         </Tabs.Panel>
         <Tabs.Panel value="metrics" pt="md">

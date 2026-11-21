@@ -41,8 +41,8 @@
 |---|---|---|---|
 | 配置 | `settings.py` | pydantic-settings，环境变量 + `.env` | `settings` 单例 |
 | 持久化 | `db.py` / `models.py` | async SQLAlchemy，SQLite WAL | `session_scope()` |
-| 认证 | `security.py` | Argon2id 哈希、JWT 签发/校验、登录限流 | `hash_password` / `create_token` |
-| 鉴权 | `authz.py` | Casbin RBAC（角色继承 + keyMatch2） | `can(role, obj, act)` |
+| 认证 | `auth/backend.py` | fastapi-users：Argon2id、JWT、Cookie 传输、失败锁定 | `current_user` / `get_jwt_strategy` |
+| 鉴权 | `authz.py` | Casbin RBAC（`g` 继承 + keyMatch/regexMatch） | `can(role, obj, act)` |
 | 依赖 | `deps.py` | 当前用户解析、权限守卫 | `require("server:control")` |
 | 事件总线 | `events.py` | 进程内 pub/sub + WS 广播 + 背压 | `bus.publish(topic, data)` |
 | 扩展点 | `extensions.py` | `nautilus.extensions` entry points + 内置 hook | `hooks.emit("server.started", ctx)` |
@@ -53,7 +53,10 @@
 | 装服 | `servers/provision.py` | Fill v3 / Purpur / Mojang / Fabric 下载 | `provision.install(...)` |
 | 文件 | `api/files.py` | 目录浏览、读写、上传下载、路径沙箱 | — |
 | 配置 | `configs/` | properties / YAML / JSON / TOML 解析与原子写 | — |
-| 插件 | `plugins/` | Modrinth / Hangar 搜索、安装、哈希校验、本地扫描 | — |
+| 插件 | `resources/plugins.py` | Modrinth / Hangar 搜索、安装、哈希校验、本地扫描 | — |
+| 备份 | `resources/backups.py` | tar.gz 归档、清单、安全恢复、份数淘汰 | `create/list/restore` |
+| 玩家 | `resources/players.py` | whitelist/ops/bans 文件、UUID 解析、RCON 同步 | `lists/whitelist_add/op_add/ban_add` |
+| 定时 | `servers/tasks.py` | APScheduler cron 维护任务（重启/备份/指令） | `run_task(id)` |
 | 审计 | `audit.py` | 所有写操作的不可变记录 | `audit.record(...)` |
 
 ## 4. 关键流程
@@ -119,6 +122,8 @@ audit_logs(id, ts, actor_id, actor, action, target, detail, ip)
 plugin_records(id, server_id, provider, project_id, slug, name, version, file, installed_at)
 policies(id, ptype, v0, v1, v2)   -- casbin: p/g 规则，可热更新
 settings_kv(key, value)
+scheduled_tasks(id, server_id, name, kind, cron, payload, enabled,
+                last_run, last_status, last_result, created_at)
 ```
 
 `state` 为运行时字段，不落库（进程重启后从 jar 与配置重建）。
@@ -138,6 +143,11 @@ settings_kv(key, value)
 | GET | `/api/servers/{id}/plugins/search?q=` | `server:plugins` |
 | POST | `/api/servers/{id}/plugins/install` | `server:plugins` |
 | GET | `/api/servers/{id}/metrics?window=300` | `server:read` |
+| GET | `/api/servers/{id}/players` | `server:players`（或 `server:control`） |
+| POST/DELETE | `/api/servers/{id}/players/{whitelist\|ops\|bans}` | `server:players` |
+| GET/POST | `/api/servers/{id}/backups` | `server:backup`（或 `server:config`） |
+| POST | `/api/servers/{id}/backups/{name}/restore` | `server:backup` |
+| GET/POST/PATCH/DELETE | `/api/servers/{id}/tasks` | `server:tasks`（或 `server:config`） |
 | GET | `/api/audit` | `audit:read` |
 | GET/POST/PATCH/DELETE | `/api/users` | `users:manage` |
 

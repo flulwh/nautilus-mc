@@ -76,6 +76,22 @@ def _payload(server: Server) -> dict:
     return data
 
 
+def _pick_port(used: set[int]) -> int:
+    """First OS-free port that no other server row has reserved.
+
+    ``free_port`` only asks the kernel, so it happily returns a port another
+    (stopped) server owns. Skipping those keeps server #2 from colliding with
+    server #1 while both are down.
+    """
+    start = 25565
+    for _ in range(200):
+        candidate = free_port(start)
+        if candidate not in used:
+            return candidate
+        start = candidate + 1
+    raise HTTPException(status.HTTP_409_CONFLICT, "没有可用的游戏端口")
+
+
 @router.get("", dependencies=[Depends(require("server", "read"))])
 async def list_servers(session: SessionDep) -> list[dict]:
     rows = (await session.execute(select(Server).order_by(Server.id))).scalars().all()
@@ -129,8 +145,8 @@ async def create_server(
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, "服务器名称已存在")
 
-    port = payload.port or free_port()
     used = {s.port for s in (await session.execute(select(Server))).scalars().all()}
+    port = payload.port or _pick_port(used)
     if port in used:
         raise HTTPException(status.HTTP_409_CONFLICT, f"端口 {port} 已被其它服务器占用")
 
@@ -351,10 +367,7 @@ async def metrics(server_id: int, limit: int = Query(240, ge=10, le=600)) -> dic
     return {"points": points, "interval": settings.metrics_interval, "state": rt.state}
 
 
-@router.get("/{server_id}/players", dependencies=[Depends(require("server", "read"))])
-async def players(server_id: int) -> dict:
-    rt = manager.get(server_id)
-    return {"players": sorted(rt.console.players), "count": len(rt.console.players)}
+# Player administration lives in ``api/players.py`` (whitelist / ops / bans).
 
 
 # ---------------------------------------------------------------- provisioning

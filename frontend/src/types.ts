@@ -112,6 +112,68 @@ export interface AuditEntry {
   ok: boolean;
 }
 
+export interface BackupArchive {
+  name: string;
+  scope: "world" | "config" | "full";
+  label: string;
+  created_at: number;
+  bytes: number;
+  entries: number;
+  includes: string[];
+}
+
+export interface BackupList {
+  archives: BackupArchive[];
+  total_bytes: number;
+  keep: number;
+  scopes: string[];
+  world_dirs: string[];
+  running: boolean;
+  in_progress: boolean;
+}
+
+export interface PlayerEntry {
+  uuid: string;
+  name: string;
+  level?: number;
+  bypassesPlayerLimit?: boolean;
+  created?: string;
+  expires?: string;
+  reason?: string;
+  source?: string;
+}
+
+export interface PlayerLists {
+  online: string[];
+  whitelist: PlayerEntry[];
+  ops: PlayerEntry[];
+  bans: PlayerEntry[];
+  whitelist_enabled: boolean;
+  online_mode: boolean;
+  state: string;
+}
+
+export interface ScheduledTask {
+  id: number;
+  server_id: number;
+  name: string;
+  kind: "restart" | "start" | "stop" | "backup" | "command";
+  cron: string;
+  payload: string;
+  enabled: boolean;
+  last_run: string | null;
+  last_status: string;
+  last_result: string;
+  created_at: string;
+  next_run: string | null;
+}
+
+export interface TaskList {
+  tasks: ScheduledTask[];
+  kinds: Record<string, string>;
+  timezone: string | null;
+}
+
 export interface UserRow {
   id: number;
   username: string;

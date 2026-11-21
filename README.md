@@ -2,8 +2,8 @@
 
 **面向 Minecraft 服务端的高性能、可扩展 Web 管理面板。**
 
-一个进程内即可跑起来的单机面板：启动/停止/重启、实时控制台、文件与配置编辑、插件市场、指标曲线、RBAC 权限与审计日志全部内置，
-并且每一个模块都建立在成熟开源项目之上，而不是自己重写一遍。
+一个进程内即可跑起来的单机面板：启动/停止/重启、实时控制台、玩家与白名单、世界备份与恢复、定时任务、
+文件与配置编辑、插件市场、指标曲线、RBAC 权限与审计日志全部内置，并且每一个模块都建立在成熟开源项目之上，而不是自己重写一遍。
 
 <p>
 <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white">
@@ -23,6 +23,14 @@
 | 指标监控 | 插件/数据包市场 |
 | --- | --- |
 | ![metrics](docs/screenshots/metrics.png) | ![market](docs/screenshots/market.png) |
+
+| 玩家与白名单 | 世界备份与恢复 |
+| --- | --- |
+| ![players](docs/screenshots/players.png) | ![backups](docs/screenshots/backups.png) |
+
+| 定时任务 |
+| --- |
+| ![tasks](docs/screenshots/tasks.png) |
 
 <details>
 <summary>更多界面：配置编辑器 / 文件管理 / 运行参数 / 用户与角色 / 审计日志</summary>
@@ -89,7 +97,27 @@
 - 配置编辑器：`server.properties`（jproperties）、`*.yml`（ruamel.yaml 保留注释）、`*.toml`（tomlkit）、`*.json`。
   写入流程恒定：**备份 → 语法校验 → 原子替换**（`os.replace`），每个文件保留最近 20 份备份在 `.nautilus/backups/`。
 
-### 6. 扩展
+### 6. 备份与恢复
+- 整目录 `tar.gz` 归档，三种范围：**世界存档**（按 `server.properties` 的 `level-name` 自动找出 `world` / `world_nether` / `world_*`）、
+  **仅配置**、**全部文件**；自动排除 `logs/`、`cache/` 与面板自身的元数据。
+- 与配置文件的小备份（`.nautilus/backups/`，每文件 20 份）分开存放：这里是 `.nautilus/archives/`，按份数保留（默认 10 份，超出自动淘汰）。
+- 恢复**要求先停机**（JVM 持有区块文件，热覆盖会损坏存档），解包前校验归档成员（拒绝绝对路径、`..`、符号链接与设备文件），
+  被替换的原文件先挪进 `.nautilus/pre-restore/<时间戳>/`，失败自动回滚。
+- 打包/解包跑在 `asyncio.to_thread`，进度经 WebSocket 推给前端；元数据写在同名 `.json` 侧车，列表不必解压。
+
+### 7. 玩家管理
+- 在线玩家来自日志解析，操作走 RCON；白名单 / OP / 封禁直接维护 `whitelist.json`、`ops.json`、`banned-players.json`。
+- UUID 解析：正版模式查 Mojang 官方 profile 接口（带缓存与超时），离线模式按 Minecraft 自身的 `OfflinePlayer:<name>` MD5 规则推导，
+  所以离线服的条目不会和服务器自己生成的重复。
+- **写序很重要**：`whitelist add` 会让服务端把内存里的列表回写 JSON，所以顺序固定为
+  `whitelist reload`（把磁盘状态读进内存）→ RCON 命令 → 面板落盘，避免面板刚加的条目被服务端的内存副本覆盖。
+
+### 8. 定时任务
+- 任务存在 `scheduled_tasks` 表（Alembic 迁移），APScheduler `CronTrigger` 按面板时区解释 5 段 cron，重启后自动重建。
+- 五种动作：重启 / 启动 / 停止 / 备份 / 控制台指令；可单独启停、立即执行，执行结果（成功/失败 + 输出）持久化并显示在列表里。
+- 任务异常写入 `last_result` 而不是抛出，避免一次失败让调度器静默丢任务。
+
+### 9. 扩展
 `pluggy`（pytest 的插件引擎）提供 6 个钩子：`nautilus_startup` / `nautilus_routes` / `server_starting` / `server_started` /
 `server_exited` / `console_line`。任一扩展抛异常只记日志，不会拖垮面板。
 
@@ -198,6 +226,8 @@ sudo systemctl enable --now nautilus
 | `NAUTILUS_METRICS_POINTS` | `600` | 内存中保留的采样点数 |
 | `NAUTILUS_MAX_LOG_LINES` | `2000` | 控制台环形缓冲行数 |
 | `NAUTILUS_STOP_GRACE_SECONDS` | `30` | 优雅停止宽限期 |
+| `NAUTILUS_BACKUP_KEEP` | `10` | 每个服务器保留的整目录备份份数 |
+| `NAUTILUS_TIMEZONE` | `Asia/Shanghai` | 定时任务 cron 的时区 |
 | `NAUTILUS_LOG_LEVEL` | `info` | |
 
 数据目录结构：
@@ -211,7 +241,11 @@ data/
 └── servers/<id>/          # 每个服务端一个独立目录
     ├── server.jar
     ├── server.properties
-    └── .nautilus/backups/ # 配置备份环
+    └── .nautilus/
+        ├── backups/       # 单文件配置备份环（20 份）
+        ├── archives/      # 整目录备份（tar.gz + .json 侧车）
+        ├── pre-restore/   # 恢复前被替换文件的现场
+        └── restore/       # 解包暂存目录
 ```
 
 ---
@@ -223,11 +257,11 @@ data/
 | 角色 | 权限 |
 | --- | --- |
 | `admin` | `* / .*` 全部，含用户管理与策略编辑 |
-| `operator` | 服务端 `read/control/console/files/config/plugins/create/install` + 审计只读 |
+| `operator` | 服务端 `read/control/console/files/config/plugins/create/install/backup/players/tasks` + 审计只读 |
 | `moderator` | 服务端 `read/console`（能看能发指令，不能改文件/配置） |
 | `viewer` | 服务端 `read` |
 
-对象为 `server` / `users` / `audit` / `system`，动作为 `read/create/delete/control/console/files/config/plugins/install/manage`。
+对象为 `server` / `users` / `audit` / `system`，动作为 `read/create/delete/control/console/files/config/plugins/install/backup/players/tasks/manage`。
 策略存在 `policies` 表，改完调用 `authz.reload_from_db()` 热加载，无需重启。
 
 ---
@@ -244,7 +278,11 @@ POST   /api/servers                     # 创建（自动建目录、写默认�
 POST   /api/servers/{id}/install        # 后台下载服务端 jar（带进度）
 POST   /api/servers/{id}/{start|stop|restart|kill}
 POST   /api/servers/{id}/command        # RCON 优先，回退 stdin
-GET    /api/servers/{id}/{logs|metrics|players}
+GET    /api/servers/{id}/{logs|metrics}
+GET    /api/servers/{id}/players        # 在线 / 白名单 / OP / 封禁
+POST   /api/servers/{id}/players/{whitelist|ops|bans|kick|whitelist-mode}
+GET    /api/servers/{id}/backups        # 归档列表；POST 创建，{name}/restore 恢复
+GET    /api/servers/{id}/tasks          # 定时任务 CRUD，{id}/run 立即执行
 GET    /api/servers/{id}/files?path=    # 沙箱目录浏览
 GET/PUT /api/servers/{id}/config/{path} # 结构化读写 + backups/restore/raw
 GET    /api/servers/{id}/plugins/search # Modrinth / Hangar 聚合搜索
@@ -255,7 +293,7 @@ GET    /api/audit                       # 审计日志
 WebSocket：
 
 ```
-/ws/servers/{id}    → {"t":"state"|"log"|"players"|"metrics"|"metrics_history"|"history"|"progress"|"ping", ...}
+/ws/servers/{id}    → {"t":"state"|"log"|"players"|"metrics"|"metrics_history"|"history"|"progress"|"backup"|"task"|"ping", ...}
 /ws/events          → 全局事件（所有服务端的状态变化）
 ```
 
@@ -294,7 +332,7 @@ my_ext = "my_ext.plugin"
 ## 测试
 
 ```bash
-pytest -q                     # 24 项：认证、RBAC、服务器生命周期、WebSocket 契约
+pytest -q                     # 48 项：认证、RBAC、生命周期、WS 契约、备份/恢复、玩家文件、cron
 python scripts/e2e_vanilla.py # 真机 E2E：下载 1.20.4 → 启动 → RCON list → 采样 → 优雅停止
 ```
 
@@ -311,7 +349,7 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 | 认证 | `fastapi-users` | 用户 CRUD、哈希、JWT、Cookie 传输都是现成的，且有维护 |
 | 权限 | `pycasbin` | RBAC + 继承 + 正则匹配，策略可热加载 |
 | 迁移 | `alembic` | 面板升级不能要求用户删库 |
-| 定时任务 | `APScheduler` | 采样与清理，比手写 `asyncio.sleep` 循环可控 |
+| 定时任务 | `APScheduler` | 指标采样、清理与 cron 维护任务共用一个调度器，比手写 `asyncio.sleep` 循环可控 |
 | 限流 | `slowapi` | 登录接口需要，避免自己实现漏桶 |
 | 配置解析 | `ruamel.yaml` / `jproperties` / `tomlkit` | **保留注释与顺序**，这是"能改配置"和"能安全改配置"的分界 |
 | 插件市场 | Modrinth API / Hangar API | 覆盖 99% 生态，且提供哈希 |
@@ -336,10 +374,10 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 
 ```
 nautilus/
-├── api/            # 路由：servers / files / configs / plugins / system
+├── api/            # 路由：servers / files / configs / plugins / players / backups / tasks / system
 ├── auth/           # fastapi-users 集成（backend, router, schemas）
-├── servers/        # 进程监管、jar 分发、指标采样、日志解析、RCON
-├── resources/      # 配置文件读写、文件沙箱、插件市场
+├── servers/        # 进程监管、jar 分发、指标采样、日志解析、RCON、cron 调度
+├── resources/      # 配置文件读写、文件沙箱、插件市场、备份归档、玩家名单
 ├── webui/dist/     # 构建后的前端
 ├── ws.py           # 控制台/事件 WebSocket
 ├── authz.py        # Casbin 封装

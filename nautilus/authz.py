@@ -55,6 +55,9 @@ ACTIONS = [
     "config",
     "plugins",
     "install",
+    "backup",
+    "players",
+    "tasks",
     "manage",
 ]
 

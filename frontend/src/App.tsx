@@ -62,6 +62,9 @@ export function App() {
     queryFn: () => api.get<Me>("/auth/me"),
     retry: false,
     staleTime: 60_000,
+    // On the login screen there is no session yet; asking would log a pointless
+    // 401 in the browser console on every visit.
+    enabled: location.pathname !== "/login",
   });
 
   useEffect(() => {
