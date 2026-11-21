@@ -177,6 +177,27 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 
 ## 快速开始
 
+### 方式零：一键启动（最省事）
+
+拿到源码后不用管虚拟环境和依赖，直接：
+
+| 平台 | 做法 |
+| --- | --- |
+| Windows | 双击 `start.bat` |
+| Linux / macOS | `./start.sh` |
+
+首次运行会自动建 `.venv`、装依赖、引导你设置管理员密码，然后启动面板并打开浏览器；
+再次运行会跳过安装直接起。常用参数：
+
+```bash
+start.bat --port 8200        # 换端口
+start.bat --host 0.0.0.0     # 允许局域网访问
+start.bat --no-browser       # 不自动开浏览器
+```
+
+按 Ctrl+C 停止。依赖装不上时脚本会提示手动命令；国内网络默认走清华镜像
+（可用 `NAUTILUS_PIP_INDEX` 覆盖，装不上会自动回落官方 PyPI）。
+
 ### 方式一：源码运行（推荐用于开发）
 
 ```bash
@@ -412,6 +433,8 @@ deploy/             # Dockerfile / compose / systemd / env 样例
 docs/               # 调研与架构文档、截图
 tests/              # pytest
 scripts/            # 真机 E2E
+start.py            # 一键启动逻辑（建 venv / 装依赖 / 引导管理员 / 开浏览器）
+start.bat start.sh  # Windows 与 Linux/macOS 的薄入口
 ```
 
 ---
