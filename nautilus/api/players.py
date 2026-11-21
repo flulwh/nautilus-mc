@@ -57,6 +57,14 @@ async def _server(session, server_id: int) -> Server:
     return server
 
 
+def _name(value: str) -> str:
+    """Player names also travel into RCON commands; validate before quoting."""
+    try:
+        return svc.validate_name(value)
+    except svc.PlayerError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
 async def _rcon(server: Server, command: str) -> bool:
     """Best-effort live apply. Never fails the request: the file is still written."""
     rt = manager.get(server.id)
@@ -148,6 +156,7 @@ async def whitelist_remove(
     actor: User = Depends(guard),
 ) -> dict:
     server = await _server(session, server_id)
+    name = _name(name)
     await _reload_whitelist(server)
     applied = await _rcon(server, f"whitelist remove {name}")
     try:
@@ -189,6 +198,7 @@ async def op_remove(
     actor: User = Depends(guard),
 ) -> dict:
     server = await _server(session, server_id)
+    name = _name(name)
     applied = await _rcon(server, f"deop {name}")
     try:
         removed = svc.op_remove(server, name)
@@ -240,6 +250,7 @@ async def ban_remove(
     actor: User = Depends(guard),
 ) -> dict:
     server = await _server(session, server_id)
+    name = _name(name)
     applied = await _rcon(server, f"pardon {name}")
     try:
         removed = svc.ban_remove(server, name)
@@ -258,7 +269,8 @@ async def kick(
     actor: User = Depends(guard),
 ) -> dict:
     server = await _server(session, server_id)
-    applied = await _rcon(server, f"kick {payload.name} {payload.reason}")
+    name = _name(payload.name)
+    applied = await _rcon(server, f"kick {name} {payload.reason}")
     if not applied:
         raise HTTPException(status.HTTP_409_CONFLICT, "服务器未运行或 RCON 不可用，无法踢出玩家")
     await record(session, action="player.kick", actor=actor, target=f"{server.name}:{payload.name}", detail={"reason": payload.reason}, ip=client_ip(request))

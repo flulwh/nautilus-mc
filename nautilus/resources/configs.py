@@ -81,6 +81,12 @@ def _backup(path: Path, root: Path) -> Path | None:
     target_dir = root / ".nautilus" / "backups"
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{path.name}.{stamp}.bak"
+    # Two saves within the same second must not overwrite one another; without
+    # this a quick edit-twice sequence left only the first state recoverable.
+    index = 2
+    while target.exists():
+        target = target_dir / f"{path.name}.{stamp}-{index}.bak"
+        index += 1
     shutil.copy2(path, target)
     backups = sorted(target_dir.glob(f"{path.name}.*.bak"))
     for old in backups[:-BACKUP_KEEP]:
@@ -186,7 +192,7 @@ def write_document(path: Path, new_data: dict[str, Any], root: Path) -> dict[str
     if fmt == "properties":
         props = jproperties.Properties()
         if path.exists():
-            props.load(path.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+            props.load(read_text(path), encoding="utf-8")
         for key, value in new_data.items():
             props[key] = "" if value is None else str(value)
         buf = io.BytesIO()
@@ -198,10 +204,11 @@ def write_document(path: Path, new_data: dict[str, Any], root: Path) -> dict[str
         yaml = YAML()
         yaml.preserve_quotes = True
         yaml.width = 4096
-        if path.exists() and path.read_text(encoding="utf-8").strip():
-            doc = yaml.load(path.read_text(encoding="utf-8"))
-        else:
-            doc = {}
+        # Re-use the tolerant reader (utf-8 / utf-8-sig / gbk / latin-1):
+        # plugin configs on Chinese Windows are often GBK, and a hard-coded
+        # utf-8 decode turned "save" into a 500.
+        existing = read_text(path) if path.exists() else ""
+        doc = yaml.load(existing) if existing.strip() else {}
         merged = _deep_merge(doc if doc is not None else {}, new_data)
         buf = io.StringIO()
         yaml.dump(merged, buf)
@@ -210,7 +217,7 @@ def write_document(path: Path, new_data: dict[str, Any], root: Path) -> dict[str
         YAML(typ="safe").load(buf.getvalue())
 
     elif fmt == "toml":
-        doc = tomlkit.parse(path.read_text(encoding="utf-8")) if path.exists() else tomlkit.document()
+        doc = tomlkit.parse(read_text(path)) if path.exists() else tomlkit.document()
         for key, value in new_data.items():
             doc[key] = value
         _atomic_write(path, tomlkit.dumps(doc).encode("utf-8"))

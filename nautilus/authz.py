@@ -66,7 +66,6 @@ class Authorizer:
     def __init__(self) -> None:
         self._enforcer: casbin.Enforcer | None = None
         self._lock = threading.Lock()
-        self._roles: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------------ load
     def load(self, policies: list[Policy]) -> None:
@@ -81,15 +80,10 @@ class Authorizer:
             try:
                 enf = casbin.Enforcer(str(model_path), str(policy_path))
                 self._enforcer = enf
-                self._roles = {r: self._policies_of(r, policies) for r in ROLES}
                 log.info("loaded %d RBAC rules", len(lines))
             except Exception:  # pragma: no cover - malformed policy file
                 log.exception("failed to build casbin enforcer; access will be denied")
                 self._enforcer = None
-
-    @staticmethod
-    def _policies_of(role: str, policies: list[Policy]) -> list[str]:
-        return [f"{p.v1}:{p.v2}" for p in policies if p.ptype == "p" and p.v0 == role]
 
     async def reload_from_db(self) -> None:
         from .db import SessionFactory
@@ -110,7 +104,20 @@ class Authorizer:
             return False
 
     def permissions(self, role: str) -> list[str]:
-        return list(self._roles.get(role, []))
+        """Concrete ``object:action`` pairs the role can perform.
+
+        Policies store regular expressions (``read|control|console``) and
+        wildcards (``*`` / ``.*``); handing those strings to the UI meant the
+        frontend had to re-implement Casbin matching and got it wrong (an
+        operator ended up with no buttons). Expanding once here, against the
+        same enforcer that guards the API, keeps both sides in agreement.
+        """
+        return self.effective(role)
+
+    def effective(self, role: str) -> list[str]:
+        if self._enforcer is None:
+            return []
+        return sorted({f"{obj}:{act}" for obj in OBJECTS for act in ACTIONS if self.can(role, obj, act)})
 
     @property
     def ready(self) -> bool:

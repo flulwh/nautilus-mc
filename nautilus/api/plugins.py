@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from ..audit import record
-from ..deps import SessionDep, UserDep, client_ip, require
+from ..deps import SessionDep, client_ip, require
 from ..models import Server, User
 from ..resources import plugins as svc
 

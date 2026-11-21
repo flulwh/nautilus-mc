@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 
 async def _make_server(client, name="survival", **extra):
@@ -19,7 +18,10 @@ async def test_server_crud(admin):
     server = await _make_server(admin)
     sid = server["id"]
     assert server["runtime"]["state"] == "stopped"
-    assert server["rcon_port"] == server["port"] + 10
+    # RCON must have its own port: echoing the game port makes the server fail
+    # to bind on startup.
+    assert server["rcon_port"] != server["port"]
+    assert 1024 <= server["rcon_port"] <= 65535
 
     r = await admin.get("/api/servers")
     assert r.status_code == 200

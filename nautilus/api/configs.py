@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from ..audit import record
-from ..deps import SessionDep, UserDep, client_ip, require
+from ..deps import SessionDep, client_ip, require
 from ..models import Server, User
 from ..resources import configs as svc
 
@@ -108,7 +108,11 @@ async def restore(
     if not source.is_relative_to(folder.resolve()) or not source.exists():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "备份不存在")
     svc.backup_file(target, server.directory)
-    shutil.copy2(source, target)
+    try:
+        shutil.copy2(source, target)
+    except OSError as exc:
+        # Windows keeps plugin/config files locked while the JVM holds them.
+        raise HTTPException(status.HTTP_409_CONFLICT, f"无法写入配置（服务器可能正在运行）：{exc}") from exc
     await record(
         session,
         action="config.restore",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -11,7 +12,11 @@ import aiofiles
 from .configs import detect_format
 
 MAX_READ = 2 * 1024 * 1024
+MAX_NAME = 200
 HIDDEN_OK = {".nautilus"}
+
+#: Reserved device names on Windows; creating them yields confusing errors.
+_WIN_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 
 
 class FileError(RuntimeError):
@@ -77,9 +82,15 @@ async def read_text(path: Path) -> str:
 async def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    async with aiofiles.open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-        await fh.write(text)
-    os.replace(tmp, path)
+    try:
+        async with aiofiles.open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            await fh.write(text)
+        os.replace(tmp, path)
+    finally:
+        # A failed write must not leave a half-written ".tmp" next to the file.
+        if tmp.exists():
+            with contextlib.suppress(OSError):
+                tmp.unlink()
 
 
 async def save_upload(path: Path, upload) -> int:
@@ -99,10 +110,22 @@ def mkdir(root: Path, rel: str) -> None:
 
 def rename(root: Path, rel: str, new_name: str) -> str:
     src = resolve(root, rel)
-    if "/" in new_name or "\\" in new_name or new_name in {".", ".."}:
+    if src == root.resolve():
+        raise FileError("不能重命名服务器根目录")
+    name = (new_name or "").strip()
+    if not name or name in {".", ".."}:
+        raise FileError("新名称不能为空")
+    if "/" in name or "\\" in name or "\x00" in name or ":" in name:
         raise FileError("新名称不能包含路径分隔符")
-    dst = src.with_name(new_name)
-    if dst.exists():
+    if len(name) > MAX_NAME:
+        raise FileError(f"名称过长（最多 {MAX_NAME} 个字符）")
+    if name.split(".")[0].upper() in _WIN_RESERVED:
+        raise FileError(f"{name} 是系统保留名称")
+    dst = src.with_name(name)
+    # ``normcase`` is identity on POSIX and lowercases on Windows, so a
+    # case-only rename ("Server.jar" -> "server.jar") is allowed there while
+    # a genuine collision still fails.
+    if os.path.normcase(name) != os.path.normcase(src.name) and dst.exists():
         raise FileError("目标已存在")
     src.replace(dst)
     return dst.relative_to(root.resolve()).as_posix()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import platform
 import subprocess
 import sys
@@ -29,12 +30,17 @@ async def list_audit(
     actor: str = Query(""),
 ) -> dict:
     stmt = select(AuditLog).order_by(AuditLog.id.desc())
+    count_stmt = select(func.count()).select_from(AuditLog)
     if action:
         stmt = stmt.where(AuditLog.action.like(f"{action}%"))
+        count_stmt = count_stmt.where(AuditLog.action.like(f"{action}%"))
     if actor:
         stmt = stmt.where(AuditLog.actor == actor)
+        count_stmt = count_stmt.where(AuditLog.actor == actor)
     rows = (await session.execute(stmt.offset(offset).limit(limit))).scalars().all()
-    total = await session.scalar(select(func.count()).select_from(AuditLog))
+    # Count with the same filters, otherwise page 2 of a filtered view claims
+    # the total of the unfiltered table.
+    total = await session.scalar(count_stmt)
     return {
         "total": total,
         "entries": [
@@ -77,7 +83,8 @@ async def meta() -> dict:
 async def system_info(session: SessionDep, _=Depends(require("system", "read"))) -> dict:
     servers = (await session.execute(select(Server))).scalars().all()
     users = await session.scalar(select(func.count()).select_from(User))
-    java = java_version()
+    # ``java -version`` is a subprocess: keep it off the event loop.
+    java = await asyncio.to_thread(java_version)
     return {
         "python": sys.version.split()[0],
         "platform": f"{platform.system()} {platform.release()}",

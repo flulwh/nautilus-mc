@@ -12,6 +12,7 @@ metadata, so listing never has to open a multi-gigabyte tarball.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -168,7 +169,9 @@ def create(server, scope: str = "world", label: str = "", progress: Progress | N
 
     total = len(entries)
     includes = sorted({rel.split("/", 1)[0] for _p, rel in entries})
-    partial = target.with_suffix(target.suffix + ".part")
+    # Unique per call: two backups started in the same second must not share a
+    # partial file, or one would write into the other's half-finished archive.
+    partial = target.with_name(f"{target.name}.{time.time_ns()}.part")
     done = 0
     try:
         with tarfile.open(partial, "w:gz", compresslevel=6) as tf:
@@ -180,10 +183,24 @@ def create(server, scope: str = "world", label: str = "", progress: Progress | N
                 done += 1
                 if progress and done % 25 == 0:
                     progress(int(done * 100 / total), f"{done}/{total}")
-        os.replace(partial, target)
+        # Publish without ever clobbering an archive a concurrent request wrote.
+        for _ in range(5):
+            try:
+                os.link(partial, target)
+                break
+            except FileExistsError:
+                target = _unique_path(folder, target.name.removesuffix(".tar.gz"))
+            except OSError:  # e.g. filesystem without hard links
+                os.replace(partial, target)
+                break
+        else:  # pragma: no cover - five collisions in a row
+            raise BackupError("无法为备份分配唯一文件名")
     except Exception as exc:
-        partial.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            partial.unlink(missing_ok=True)
         raise BackupError(f"打包失败：{exc}") from exc
+    with contextlib.suppress(OSError):
+        partial.unlink(missing_ok=True)
 
     meta = ArchiveMeta(
         name=target.name,
@@ -280,10 +297,19 @@ def _prune(server, folder: Path) -> None:
     from ..settings import settings
 
     keep = max(1, int(settings.backup_keep))
-    archives = sorted((p for p in folder.glob("*.tar.gz") if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:  # concurrent delete: sort it last instead of failing
+            return 0.0
+
+    archives = sorted((p for p in folder.glob("*.tar.gz") if p.is_file()), key=mtime, reverse=True)
     for stale in archives[keep:]:
-        stale.unlink(missing_ok=True)
-        _meta_path(stale).unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            stale.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            _meta_path(stale).unlink(missing_ok=True)
 
 
 # ------------------------------------------------------------------- restore
@@ -298,6 +324,11 @@ def _safe_members(tf: tarfile.TarFile) -> list[tarfile.TarInfo]:
             raise BackupError(f"归档中包含非法路径：{member.name}")
         if member.issym() or member.islnk() or member.isdev():
             raise BackupError(f"归档中包含不支持的条目类型：{member.name}")
+        # The panel's own bookkeeping (archives, backups, pre-restore copies)
+        # must never be written by a restore: that would let an archive
+        # overwrite the very snapshots it is meant to be protected by.
+        if Path(name).parts and Path(name).parts[0] == ".nautilus":
+            raise BackupError(f"归档中包含面板保留目录：{member.name}")
         members.append(member)
     return members
 
@@ -314,7 +345,7 @@ def restore(server, name: str, *, running: bool = False) -> dict[str, Any]:
 
     try:
         with tarfile.open(target, "r:gz") as tf:
-            members = _safe_members(tf)
+            _safe_members(tf)  # raises before a single byte is extracted
             try:
                 # Python >= 3.12: apply the stdlib's own safety filter too.
                 tf.extractall(staging, filter="data")
@@ -328,6 +359,7 @@ def restore(server, name: str, *, running: bool = False) -> dict[str, Any]:
         raise BackupError(f"解包失败：{exc}") from exc
 
     moved: list[tuple[Path, Path]] = []
+    added: list[Path] = []
     pre = root / PRERESTORE_DIRNAME / stamp
     replaced: list[str] = []
     try:
@@ -343,10 +375,20 @@ def restore(server, name: str, *, running: bool = False) -> dict[str, Any]:
                         parked.unlink(missing_ok=True)
                 shutil.move(str(destination), str(parked))
                 moved.append((destination, parked))
+            else:
+                added.append(destination)
             shutil.move(str(item), str(destination))
             replaced.append(item.name)
     except Exception as exc:
-        # Put the original tree back before surfacing the error.
+        # Undo in reverse: drop what came from the archive, then put the
+        # original tree back. Without removing ``added`` a failed restore would
+        # leave a half-merged directory behind.
+        for destination in reversed(added):
+            if destination.is_dir():
+                shutil.rmtree(destination, ignore_errors=True)
+            else:
+                with contextlib.suppress(OSError):
+                    destination.unlink(missing_ok=True)
         for destination, parked in reversed(moved):
             if destination.exists():
                 if destination.is_dir():

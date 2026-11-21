@@ -10,16 +10,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from ..audit import record
 from ..authz import ROLES, authz
 from ..db import SessionFactory
 from ..deps import SessionDep, UserDep, client_ip, require
-from ..models import User
+from ..models import AuditLog, User
 from .backend import auth_backend, cookie_transport, fastapi_users, get_jwt_strategy, get_user_manager, validate_role
-from .schemas import UserCreate, UserRead, UserUpdate
+from .schemas import UserCreate, UserUpdate
 
 router = APIRouter(tags=["auth"])
 
@@ -154,6 +154,9 @@ async def update_user(
         validate_role(data["role"])
         if target.id == actor.id and data["role"] != "admin":
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "不能降低自己的权限")
+        if target.role == "admin" and data["role"] != "admin":
+            if await count_admins() <= 1:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少需要保留一个管理员")
         target.is_superuser = data["role"] == "admin"
     for key, value in data.items():
         if value is not None:
@@ -183,6 +186,12 @@ async def delete_user(user_id: int, request: Request, actor: UserDep, session: S
     target = await session.get(User, user_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "用户不存在")
+    if target.role == "admin" and await count_admins() <= 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少需要保留一个管理员")
+    # ``audit_logs.actor_id`` references ``users.id`` and the audit trail must
+    # outlive the account. Detach the rows first, otherwise SQLite's foreign-key
+    # check turns every user deletion into a 500.
+    await session.execute(update(AuditLog).where(AuditLog.actor_id == user_id).values(actor_id=None))
     await session.delete(target)
     await record(session, action="user.delete", actor=actor, target=target.username, ip=client_ip(request))
 
@@ -195,8 +204,7 @@ async def user_sessions(user_id: int) -> dict:
 
 async def count_admins() -> int:
     async with SessionFactory() as s:
-        rows = (await s.execute(select(User).where(User.role == "admin"))).scalars().all()
-        return len(rows)
+        return int(await s.scalar(select(func.count()).select_from(User).where(User.role == "admin")) or 0)
 
 
 def now() -> datetime:

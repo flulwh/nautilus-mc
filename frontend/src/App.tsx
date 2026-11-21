@@ -39,6 +39,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
 import { ServerDetail } from "./pages/ServerDetail";
 import { UsersPage } from "./pages/Users";
+import { hasPerm, isAdmin as isAdminUser } from "./perm";
 import type { Me } from "./types";
 
 function NavLink({ to, icon, label, active }: { to: string; icon: React.ReactNode; label: string; active: boolean }) {
@@ -93,7 +94,8 @@ export function App() {
 
   if (location.pathname === "/login") return <Navigate to="/" replace />;
 
-  const isAdmin = me.user.role === "admin" || me.permissions.includes("users:manage") || me.permissions.includes("*:.*");
+  const isAdmin = isAdminUser(me.user.role, me.permissions);
+  const canAudit = hasPerm(me.permissions, "audit", "read");
 
   const logout = async () => {
     await api.logout();
@@ -177,7 +179,9 @@ export function App() {
             active={location.pathname.startsWith("/servers")}
           />
           <div className="section-label">治理</div>
-          <NavLink to="/audit" icon={<IconActivity size={16} />} label="审计日志" active={location.pathname === "/audit"} />
+          {canAudit && (
+            <NavLink to="/audit" icon={<IconActivity size={16} />} label="审计日志" active={location.pathname === "/audit"} />
+          )}
           {isAdmin && (
             <NavLink
               to="/users"
@@ -213,7 +217,7 @@ export function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/servers" element={<Navigate to="/" replace />} />
           <Route path="/servers/:id" element={<ServerDetail />} />
-          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/audit" element={canAudit ? <AuditPage /> : <Navigate to="/" replace />} />
           <Route path="/users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -30,6 +30,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../api";
 import { ServerCard } from "../components/ServerCard";
+import { hasPerm } from "../perm";
 import type { Server } from "../types";
 
 function Stat({ icon, label, value, hint }: { icon: React.ReactNode; label: string; value: string; hint?: string }) {
@@ -75,8 +76,7 @@ export function Dashboard() {
     queryFn: () => api.get("/auth/me"),
     staleTime: 60_000,
   });
-  const canControl =
-    !!me.data && (me.data.user.role === "admin" || me.data.permissions.some((p) => p === "*:.*" || p.startsWith("server:control")));
+  const canControl = !!me.data && hasPerm(me.data.permissions, "server", "control");
 
   const servers = useQuery<Server[]>({
     queryKey: ["servers"],
@@ -163,7 +163,7 @@ export function Dashboard() {
       <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
         <Stat icon={<IconStack2 size={18} />} label="服务器" value={String(stats.total)} hint={`${stats.running} 个运行中`} />
         <Stat icon={<IconServer2 size={18} />} label="在线玩家" value={String(stats.players)} hint="实时日志解析" />
-        <Stat icon={<IconCpu size={18} />} label="面板内存" value={`${stats.mem.toFixed(0)} MB`} hint="进程树合计 RSS" />
+        <Stat icon={<IconCpu size={18} />} label="服务端内存" value={`${stats.mem.toFixed(0)} MB`} hint="进程树合计 RSS" />
         <Stat icon={<IconUsers size={18} />} label="运行中" value={`${stats.running}`} hint="就绪检测通过" />
       </SimpleGrid>
 

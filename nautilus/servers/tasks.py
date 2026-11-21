@@ -27,7 +27,7 @@ from ..db import SessionFactory
 from ..events import bus, topic
 from ..models import ScheduledTask, Server
 from ..settings import settings
-from .manager import ManagerError, manager
+from .manager import manager
 
 log = logging.getLogger("nautilus.tasks")
 

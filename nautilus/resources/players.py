@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -33,6 +34,11 @@ log = logging.getLogger("nautilus.players")
 NAME_RE = re.compile(r"^[A-Za-z0-9_]{2,16}$")
 PROFILE_TTL = 6 * 3600
 _profiles: TTLCache = TTLCache(maxsize=2048, ttl=PROFILE_TTL)
+
+#: Serialises read-modify-write cycles over whitelist/ops/bans. Two admins
+#: clicking "add" at the same time used to lose one of the two entries: both
+#: read the old JSON, both wrote their own version, last one won.
+_MUTATE_LOCK = threading.RLock()
 
 WHITELIST = "whitelist.json"
 OPS = "ops.json"
@@ -122,13 +128,18 @@ def validate_name(name: str) -> str:
 async def resolve(server, name: str) -> dict[str, str]:
     """Return ``{name, uuid, source}`` for a player name."""
     name = validate_name(name)
-    cached = _profiles.get(name.lower())
+    offline = not online_mode(server)
+    # Online and offline UUIDs for the same name differ, so the mode is part of
+    # the key. Offline UUIDs are also case-sensitive (the server hashes the name
+    # exactly as typed), which is why only the online lookup lower-cases.
+    cache_key = f"offline:{name}" if offline else f"online:{name.lower()}"
+    cached = _profiles.get(cache_key)
     if cached:
         return {**cached, "name": name}
 
-    if not online_mode(server):
+    if offline:
         profile = {"uuid": offline_uuid(name), "source": "offline"}
-        _profiles[name.lower()] = profile
+        _profiles[cache_key] = profile
         return {**profile, "name": name}
 
     try:
@@ -137,7 +148,7 @@ async def resolve(server, name: str) -> dict[str, str]:
         if resp.status_code == 200:
             payload = resp.json()
             profile = {"uuid": _norm_uuid(payload["id"]), "source": "mojang"}
-            _profiles[name.lower()] = profile
+            _profiles[cache_key] = profile
             return {**profile, "name": payload.get("name", name)}
         if resp.status_code == 404:
             raise PlayerError(f"找不到玩家 {name}：该账号不存在，或服务器是离线模式")
@@ -162,52 +173,55 @@ def lists(server) -> dict[str, Any]:
 
 def whitelist_add(server, profile: dict[str, str]) -> dict[str, str]:
     path = server.directory / WHITELIST
-    rows = _read_json(path, [])
-    if any(str(r.get("uuid", "")).lower() == profile["uuid"].lower() for r in rows):
-        return profile
-    rows.append({"uuid": profile["uuid"], "name": profile["name"]})
-    _write_json(path, rows)
+    with _MUTATE_LOCK:
+        rows = _read_json(path, [])
+        if any(str(r.get("uuid", "")).lower() == profile["uuid"].lower() for r in rows):
+            return profile
+        rows.append({"uuid": profile["uuid"], "name": profile["name"]})
+        _write_json(path, rows)
     return profile
 
 
 def whitelist_remove(server, name: str) -> bool:
     path = server.directory / WHITELIST
-    rows = _read_json(path, [])
-    kept = [r for r in rows if str(r.get("name", "")).lower() != name.lower()]
-    if len(kept) == len(rows):
-        return False
-    _write_json(path, kept)
+    with _MUTATE_LOCK:
+        rows = _read_json(path, [])
+        kept = [r for r in rows if str(r.get("name", "")).lower() != name.lower()]
+        if len(kept) == len(rows):
+            return False
+        _write_json(path, kept)
     return True
 
 
 def op_add(server, profile: dict[str, str], level: int = 4) -> dict[str, Any]:
     path = server.directory / OPS
-    rows = _read_json(path, [])
     entry = {
         "uuid": profile["uuid"],
         "name": profile["name"],
         "level": max(1, min(4, int(level))),
         "bypassesPlayerLimit": False,
     }
-    rows = [r for r in rows if str(r.get("uuid", "")).lower() != profile["uuid"].lower()]
-    rows.append(entry)
-    _write_json(path, rows)
+    with _MUTATE_LOCK:
+        rows = _read_json(path, [])
+        rows = [r for r in rows if str(r.get("uuid", "")).lower() != profile["uuid"].lower()]
+        rows.append(entry)
+        _write_json(path, rows)
     return entry
 
 
 def op_remove(server, name: str) -> bool:
     path = server.directory / OPS
-    rows = _read_json(path, [])
-    kept = [r for r in rows if str(r.get("name", "")).lower() != name.lower()]
-    if len(kept) == len(rows):
-        return False
-    _write_json(path, kept)
+    with _MUTATE_LOCK:
+        rows = _read_json(path, [])
+        kept = [r for r in rows if str(r.get("name", "")).lower() != name.lower()]
+        if len(kept) == len(rows):
+            return False
+        _write_json(path, kept)
     return True
 
 
 def ban_add(server, profile: dict[str, str], reason: str = "Banned by an operator") -> dict[str, Any]:
     path = server.directory / BANS
-    rows = _read_json(path, [])
     entry = {
         "uuid": profile["uuid"],
         "name": profile["name"],
@@ -216,19 +230,22 @@ def ban_add(server, profile: dict[str, str], reason: str = "Banned by an operato
         "expires": "forever",
         "reason": (reason or "Banned by an operator")[:200],
     }
-    rows = [r for r in rows if str(r.get("uuid", "")).lower() != profile["uuid"].lower()]
-    rows.append(entry)
-    _write_json(path, rows)
+    with _MUTATE_LOCK:
+        rows = _read_json(path, [])
+        rows = [r for r in rows if str(r.get("uuid", "")).lower() != profile["uuid"].lower()]
+        rows.append(entry)
+        _write_json(path, rows)
     return entry
 
 
 def ban_remove(server, name: str) -> bool:
     path = server.directory / BANS
-    rows = _read_json(path, [])
-    kept = [r for r in rows if str(r.get("name", "")).lower() != name.lower()]
-    if len(kept) == len(rows):
-        return False
-    _write_json(path, kept)
+    with _MUTATE_LOCK:
+        rows = _read_json(path, [])
+        kept = [r for r in rows if str(r.get("name", "")).lower() != name.lower()]
+        if len(kept) == len(rows):
+            return False
+        _write_json(path, kept)
     return True
 
 

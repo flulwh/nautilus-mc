@@ -140,6 +140,10 @@ async def restore_backup(
     rt = manager.get(server_id)
     if rt.alive:
         raise HTTPException(status.HTTP_409_CONFLICT, "请先停止服务器再恢复备份")
+    if server_id in _in_progress:
+        # Restoring while an archive is still being written would delete and
+        # rewrite the very files the archiver is reading.
+        raise HTTPException(status.HTTP_409_CONFLICT, "备份任务进行中，请等待完成后再恢复")
     try:
         result = await asyncio.to_thread(svc.restore, server, name)
     except svc.BackupError as exc:

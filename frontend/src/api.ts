@@ -28,13 +28,17 @@ function describe(payload: unknown): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const { headers, ...rest } = init;
   const res = await fetch(BASE + path, {
     credentials: "include",
+    ...rest,
+    // ``headers`` must come last: spreading ``init`` after the merged object
+    // silently replaced it, dropping Content-Type on every JSON call that
+    // passed a header.
     headers: {
       ...(init.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
-      ...(init.headers || {}),
+      ...(headers || {}),
     },
-    ...init,
   });
 
   if (res.status === 401) {
@@ -42,11 +46,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(401, "会话已过期，请重新登录");
   }
   if (!res.ok) {
-    let body: unknown = null;
+    // Read the body once: ``res.json()`` then ``res.text()`` throws
+    // "body used already" and masked the real error message.
+    const text = await res.text();
+    let body: unknown = text;
     try {
-      body = await res.json();
+      body = JSON.parse(text);
     } catch {
-      body = await res.text();
+      /* plain-text or empty error body */
     }
     throw new ApiError(res.status, describe(body));
   }

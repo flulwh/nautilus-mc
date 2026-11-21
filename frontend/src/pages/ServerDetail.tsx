@@ -34,6 +34,7 @@ import { useParams } from "react-router-dom";
 
 import { api, ApiError } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
+import { hasPerm } from "../perm";
 import type { Me, Server } from "../types";
 import { useSocket } from "../useSocket";
 // Tabs are code-split: xterm (~250KB) and uPlot are only fetched when opened.
@@ -64,8 +65,7 @@ export function ServerDetail() {
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.get<Me>("/auth/me"), staleTime: 60_000 });
   const perms = me.data?.permissions ?? [];
-  const isAdmin = me.data?.user.role === "admin" || perms.includes("*:.*");
-  const can = (action: string) => isAdmin || perms.includes(`server:${action}`);
+  const can = (action: string) => hasPerm(perms, "server", action);
 
   const server = useQuery<Server>({
     queryKey: ["server", String(serverId)],

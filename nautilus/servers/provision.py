@@ -14,12 +14,16 @@ mismatch aborts the install instead of leaving a broken jar behind.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
+import os
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+import aiofiles
 import httpx
 
 log = logging.getLogger("nautilus.provision")
@@ -156,35 +160,48 @@ async def download(
     progress: Progress | None = None,
 ) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".part")
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.{time.time_ns()}.part")
     sha256 = hashlib.sha256()
     sha1 = hashlib.sha1()
     done = 0
+    total = 0
 
-    async with await _client() as c:
-        async with c.stream("GET", url) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("content-length", "0") or 0)
-            with open(tmp, "wb") as fh:
-                async for chunk in r.aiter_bytes(256 * 1024):
-                    fh.write(chunk)
-                    sha256.update(chunk)
-                    sha1.update(chunk)
-                    done += len(chunk)
-                    if progress:
-                        res = progress(done, total)
-                        if asyncio.iscoroutine(res):
-                            await res
+    try:
+        async with await _client() as c:
+            async with c.stream("GET", url) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length", "0") or 0)
+                async with aiofiles.open(tmp, "wb") as fh:
+                    async for chunk in r.aiter_bytes(256 * 1024):
+                        await fh.write(chunk)
+                        sha256.update(chunk)
+                        sha1.update(chunk)
+                        done += len(chunk)
+                        if progress:
+                            res = progress(done, total)
+                            if asyncio.iscoroutine(res):
+                                await res
 
-    if expected_sha256 and sha256.hexdigest().lower() != expected_sha256.lower():
-        tmp.unlink(missing_ok=True)
-        raise ProvisionError("SHA-256 校验失败，已丢弃下载文件")
-    if expected_sha1 and sha1.hexdigest().lower() != expected_sha1.lower():
-        tmp.unlink(missing_ok=True)
-        raise ProvisionError("SHA-1 校验失败，已丢弃下载文件")
+        # A dropped connection can end the stream early without raising; the
+        # content-length is the only signal for sources that publish no hash.
+        if total and done != total:
+            raise ProvisionError(f"下载不完整（{done}/{total} 字节），已丢弃")
 
-    target.unlink(missing_ok=True)
-    tmp.replace(target)
+        if expected_sha256 and sha256.hexdigest().lower() != expected_sha256.lower():
+            raise ProvisionError("SHA-256 校验失败，已丢弃下载文件")
+        if expected_sha1 and sha1.hexdigest().lower() != expected_sha1.lower():
+            raise ProvisionError("SHA-1 校验失败，已丢弃下载文件")
+    except Exception:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
+
+    try:
+        os.replace(tmp, target)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise ProvisionError(f"无法写入 {target.name}（{exc}）。如果服务器正在运行，请先停止再更新。") from exc
     log.info("installed %s (%d bytes)", target, done)
     return target
 

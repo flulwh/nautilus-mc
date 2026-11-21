@@ -12,7 +12,6 @@ Installed jars are inspected locally (no network) by reading ``plugin.yml`` /
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import logging
 import re
@@ -26,7 +25,6 @@ import httpx
 from cachetools import TTLCache
 
 from ..models import Server
-from ..settings import settings
 
 log = logging.getLogger("nautilus.plugins")
 
@@ -134,6 +132,21 @@ def _require_compatible_source(server: Server | None, source: str) -> None:
         )
 
 
+_PROJECT_RE = re.compile(r"^[A-Za-z0-9._/-]{1,120}$")
+
+
+def _project_id(project: str) -> str:
+    """Validate a project slug before it is interpolated into a URL path.
+
+    Slugs are user input; ``../`` or ``?`` would rewrite the upstream request
+    (path traversal / query injection against the market API).
+    """
+    value = (project or "").strip()
+    if not _PROJECT_RE.match(value) or ".." in value.split("/"):
+        raise PluginError("非法的项目标识")
+    return value
+
+
 # ------------------------------------------------------------------- search
 
 
@@ -193,6 +206,7 @@ async def search(query: str, *, server: Server | None = None, source: str = "mod
 
 async def versions(project: str, *, server: Server, source: str = "modrinth", limit: int = 12) -> list[dict]:
     _require_compatible_source(server, source)
+    project = _project_id(project)
     if source == "hangar":
         platform = {"paper": "PAPER", "purpur": "PAPER"}.get(server.kind, "PAPER")
         data = await _cached_get(f"{HANGAR}/projects/{project}/versions", {"limit": limit, "platform": platform})
@@ -240,6 +254,7 @@ async def versions(project: str, *, server: Server, source: str = "modrinth", li
 
 async def resolve(project: str, *, server: Server, source: str = "modrinth", version_id: str = "") -> Artifact:
     _require_compatible_source(server, source)
+    project = _project_id(project)
     if source == "hangar":
         platform = "PAPER"
         versions_list = await versions(project, server=server, source="hangar", limit=25)
@@ -445,6 +460,11 @@ def _safe(root: Path, filename: str) -> Path:
     return path
 
 
+def _version_key(value: str) -> tuple:
+    """Order versions numerically, not lexicographically ("1.10" > "1.9")."""
+    return tuple((0, int(p)) if p.isdigit() else (1, p.lower()) for p in re.split(r"[.\-+_ ]", str(value)) if p)
+
+
 async def check_updates(server: Server) -> list[dict]:
     """Compare installed jar versions with the latest from Modrinth (best effort)."""
 
@@ -467,7 +487,7 @@ async def check_updates(server: Server) -> list[dict]:
             "filename": item["filename"],
             "installed": item["version"],
             "latest": latest[0]["name"],
-            "updatable": str(latest[0]["name"]) != str(item["version"]),
+            "updatable": _version_key(latest[0]["name"]) > _version_key(item["version"]),
             "project": found[0]["id"],
         }
 

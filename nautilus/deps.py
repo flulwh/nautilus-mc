@@ -27,9 +27,14 @@ class Forbidden(HTTPException):
 
 
 def client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()[:64]
+    """Peer address, already de-proxied by uvicorn when that is configured.
+
+    ``uvicorn`` is started with ``proxy_headers=True`` and
+    ``forwarded_allow_ips`` (see ``__main__.py``), so ``scope["client"]`` is
+    rewritten from ``X-Forwarded-For`` *only* for trusted proxies. Reading the
+    header here as well would undo that check: any direct client could spoof
+    its audit-log address. Trust the transport, not the header.
+    """
     return request.client.host if request.client else ""
 
 

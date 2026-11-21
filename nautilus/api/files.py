@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..audit import record
-from ..deps import SessionDep, UserDep, client_ip, require
+from ..deps import SessionDep, client_ip, require
 from ..models import Server, User
 from ..resources import files as svc
 

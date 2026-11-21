@@ -15,8 +15,12 @@ sys.path.insert(0, str(ROOT))
 from nautilus.models import Base  # noqa: E402
 
 config = context.config
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# ``fileConfig`` reconfigures the *global* logging tree: the ini sets root to
+# WARN, which silences every INFO line the application would emit afterwards.
+# When Alembic is driven from the app (the normal path), keep the app's logging
+# intact; only the standalone CLI should apply the ini.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

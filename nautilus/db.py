@@ -74,6 +74,8 @@ def run_migrations() -> None:
     cfg = Config(str(cfg_path))
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.set_main_option("sqlalchemy.url", SYNC_DB_URL)
+    # Keep the application's logging configuration (see migrations/env.py).
+    cfg.attributes["configure_logger"] = False
     command.upgrade(cfg, "head")
 
 

@@ -86,17 +86,31 @@ async def _serve(
                 await asyncio.sleep(HEARTBEAT)
                 await ws.send_json({"t": "ping"})
 
-        tasks = [asyncio.create_task(pump()), asyncio.create_task(heartbeat())]
+        async def receiver() -> None:
+            # Without a receive loop Starlette never learns that the client
+            # closed the tab; the connection (and its queue) then lives on
+            # until a heartbeat write happens to fail.
+            while True:
+                await ws.receive_text()
+
+        tasks = [asyncio.create_task(pump()), asyncio.create_task(heartbeat()), asyncio.create_task(receiver())]
         try:
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
             for task in pending:
                 task.cancel()
             for task in done:
                 with contextlib.suppress(WebSocketDisconnect, asyncio.CancelledError):
-                    task.result()
+                    exc = task.exception()
+                    if exc is not None and not isinstance(exc, (OSError, RuntimeError)):
+                        log.debug("websocket task failed: %s", exc)
         finally:
             for task in tasks:
                 task.cancel()
+            # Await the cancellations: a pending task at loop shutdown prints
+            # "Task was destroyed but it is pending" on every closed tab.
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
 
 
 @router.websocket("/ws/servers/{server_id}")
@@ -126,7 +140,7 @@ async def server_stream(ws: WebSocket, server_id: int) -> None:
         await _serve(ws, f"server:{server_id}", initial)
     except WebSocketDisconnect:
         pass
-    except RuntimeError as exc:  # pragma: no cover - client vanished mid-send
+    except (RuntimeError, OSError) as exc:  # pragma: no cover - client vanished mid-send
         log.debug("websocket closed: %s", exc)
 
 
@@ -141,5 +155,5 @@ async def global_stream(ws: WebSocket) -> None:
         await _serve(ws, "global", lambda: [{"t": "hello", "connections": bus.connections}])
     except WebSocketDisconnect:
         pass
-    except RuntimeError as exc:  # pragma: no cover
+    except (RuntimeError, OSError) as exc:  # pragma: no cover
         log.debug("websocket closed: %s", exc)

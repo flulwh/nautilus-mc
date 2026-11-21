@@ -1,5 +1,5 @@
 import { useElementSize } from "@mantine/hooks";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
 
 export interface Series {
@@ -25,15 +25,21 @@ export function MetricChart({
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<uPlot | null>(null);
 
+  // Within a short window uPlot splits on seconds; dropping them collapsed
+  // every label to the same "HH:MM".
+  const span = timestamps.length > 1 ? timestamps[timestamps.length - 1] - timestamps[0] : 0;
+  const withSeconds = span > 0 && span <= 900;
+
+  const data = useMemo<uPlot.AlignedData>(
+    () => [timestamps, ...series.map((s) => s.data)] as uPlot.AlignedData,
+    [timestamps, series],
+  );
+
+  // Structure only: the chart is rebuilt when the geometry changes, not on
+  // every sample. Recreating it per tick (every 3s) destroyed and rebuilt
+  // three canvases just to move one point.
   useEffect(() => {
     if (!hostRef.current || width < 80) return;
-    const data: uPlot.AlignedData = [timestamps, ...series.map((s) => s.data)] as uPlot.AlignedData;
-
-    // Within a short window uPlot splits on seconds; dropping them collapsed
-    // every label to the same "HH:MM".
-    const span = timestamps.length > 1 ? timestamps[timestamps.length - 1] - timestamps[0] : 0;
-    const withSeconds = span > 0 && span <= 900;
-
     const opts: uPlot.Options = {
       width,
       height,
@@ -84,7 +90,14 @@ export function MetricChart({
       chart.destroy();
       chartRef.current = null;
     };
-  }, [width, height, min, series, timestamps]);
+    // ``data`` and ``series`` are intentionally excluded: they are applied by
+    // the update effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width, height, min, withSeconds]);
+
+  useEffect(() => {
+    chartRef.current?.setData(data);
+  }, [data]);
 
   return (
     <div ref={sizeRef} style={{ width: "100%" }}>

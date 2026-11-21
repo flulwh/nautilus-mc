@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
@@ -23,7 +22,7 @@ from .api import backups, configs, files, players, plugins, servers, system, tas
 from .auth import router as auth_router
 from .auth.backend import auth_backend, fastapi_users, get_user_manager  # noqa: F401  (re-export)
 from .authz import authz
-from .db import SessionFactory, autostart_servers, init_db
+from .db import autostart_servers, init_db
 from .events import bus
 from .extensions import collected_routers, emit, load_extensions
 from .servers import metrics as metrics_svc

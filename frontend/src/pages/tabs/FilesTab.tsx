@@ -235,7 +235,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
                 </Table.Td>
               </Table.Tr>
             ))}
-            {!list.data?.entries.length && (
+            {list.isSuccess && !list.data?.entries.length && (
               <Table.Tr>
                 <Table.Td colSpan={4}>
                   <Text size="xs" c="dimmed" py="md" ta="center">

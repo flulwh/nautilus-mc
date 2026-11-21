@@ -73,7 +73,12 @@ export function ConfigTab({ serverId }: { serverId: number }) {
         next[k] = typeof v === "object" && v !== null ? JSON.stringify(v, null, 2) : String(v ?? "");
       }
       setDraft(next);
-      setMode(doc.data.format === "properties" ? "form" : "form");
+      // The structured form only knows how to round-trip flat scalars. YAML /
+      // TOML / JSON configs (paper-global.yml, mods.toml...) contain nested
+      // maps; editing them through the form used to write JSON strings where
+      // maps used to be, which the server then refused to parse. Those formats
+      // are edited as source, where the backend validates the syntax.
+      setMode(doc.data.format === "properties" ? "form" : "source");
     }
   }, [doc.data]);
 
@@ -131,6 +136,9 @@ export function ConfigTab({ serverId }: { serverId: number }) {
     const q = filter.toLowerCase();
     return all.filter((k) => k.toLowerCase().includes(q) || String(draft[k]).toLowerCase().includes(q));
   }, [draft, filter]);
+
+  // Only .properties has flat, typed values the form can write back safely.
+  const supportsForm = doc.data?.format === "properties";
 
   return (
     <Grid gutter="md">
@@ -220,7 +228,14 @@ export function ConfigTab({ serverId }: { serverId: number }) {
                   )}
                 </Group>
                 <Group gap={6}>
-                  <Button size="xs" variant={mode === "form" ? "light" : "subtle"} color="gray" onClick={() => setMode("form")}>
+                  <Button
+                    size="xs"
+                    variant={mode === "form" ? "light" : "subtle"}
+                    color="gray"
+                    disabled={!supportsForm}
+                    title={supportsForm ? undefined : "结构化编辑仅支持 .properties，嵌套格式请用源码模式"}
+                    onClick={() => setMode("form")}
+                  >
                     结构化
                   </Button>
                   <Button size="xs" variant={mode === "source" ? "light" : "subtle"} color="gray" onClick={() => setMode("source")}>
@@ -231,7 +246,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
                     color="abyss"
                     leftSection={<IconDeviceFloppy size={14} />}
                     loading={saveForm.isPending || saveRaw.isPending}
-                    onClick={() => (mode === "form" ? saveForm.mutate() : saveRaw.mutate())}
+                    onClick={() => (mode === "form" && supportsForm ? saveForm.mutate() : saveRaw.mutate())}
                     disabled={!selected}
                   >
                     保存
@@ -239,7 +254,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
                 </Group>
               </Group>
 
-              {mode === "form" ? (
+              {mode === "form" && supportsForm ? (
                 <>
                   <TextInput
                     size="xs"

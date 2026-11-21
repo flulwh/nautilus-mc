@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import secrets
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ..audit import record
 from ..db import SessionFactory
-from ..deps import SessionDep, UserDep, client_ip, require
+from ..deps import SessionDep, client_ip, require
 from ..events import bus, topic
 from ..models import Server, User
 from ..resources import files as file_service
@@ -43,14 +42,16 @@ class ServerCreate(BaseModel):
 
 
 class ServerUpdate(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=2, max_length=48, pattern=r"^[A-Za-z0-9_.\- ]+$")
     version: str | None = None
-    jar: str | None = None
+    #: Relative to the server directory: a path with separators would let the
+    #: supervisor execute a jar from anywhere on the host.
+    jar: str | None = Field(default=None, min_length=1, max_length=120, pattern=r"^[^/\\:*?\"<>|]+$")
     java: str | None = None
     memory_mb: int | None = Field(default=None, ge=512, le=65536)
     min_memory_mb: int | None = Field(default=None, ge=128, le=32768)
-    port: int | None = None
-    rcon_port: int | None = None
+    port: int | None = Field(default=None, ge=1024, le=65535)
+    rcon_port: int | None = Field(default=None, ge=1024, le=65535)
     rcon_enabled: bool | None = None
     jvm_args: str | None = None
     server_args: str | None = None
@@ -92,6 +93,19 @@ def _pick_port(used: set[int]) -> int:
     raise HTTPException(status.HTTP_409_CONFLICT, "没有可用的游戏端口")
 
 
+def _pick_rcon_port(port: int, reserved: set[int]) -> int:
+    """RCON port that collides with neither a game port nor another RCON port.
+
+    The old ``port + 10`` derivation silently produced a duplicate as soon as
+    two servers were >= 10 ports apart (25565/25575 vs 25575/25585), and the
+    second server then failed to start with "Failed to bind to port".
+    """
+    for candidate in range(port + 1, min(port + 200, 65535)):
+        if candidate not in reserved and not port_in_use(candidate):
+            return candidate
+    raise HTTPException(status.HTTP_409_CONFLICT, "没有可用的 RCON 端口")
+
+
 @router.get("", dependencies=[Depends(require("server", "read"))])
 async def list_servers(session: SessionDep) -> list[dict]:
     rows = (await session.execute(select(Server).order_by(Server.id))).scalars().all()
@@ -99,7 +113,11 @@ async def list_servers(session: SessionDep) -> list[dict]:
     for s in rows:
         item = _payload(s)
         try:
-            item["disk_bytes"] = file_service.tree_size(s.directory) if s.directory.exists() else 0
+            # Walking a large world can take seconds; never do it on the event
+            # loop, or the whole panel stalls while the list renders.
+            item["disk_bytes"] = (
+                await asyncio.to_thread(file_service.tree_size, s.directory) if s.directory.exists() else 0
+            )
             item["jar_ready"] = (s.directory / s.jar).exists()
         except OSError:
             item["disk_bytes"] = 0
@@ -145,9 +163,11 @@ async def create_server(
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, "服务器名称已存在")
 
-    used = {s.port for s in (await session.execute(select(Server))).scalars().all()}
-    port = payload.port or _pick_port(used)
-    if port in used:
+    rows = (await session.execute(select(Server))).scalars().all()
+    # A game port must not collide with another server's RCON port either.
+    taken = {s.port for s in rows} | {s.rcon_port for s in rows}
+    port = payload.port or _pick_port(taken)
+    if port in taken:
         raise HTTPException(status.HTTP_409_CONFLICT, f"端口 {port} 已被其它服务器占用")
 
     server = Server(
@@ -157,7 +177,7 @@ async def create_server(
         memory_mb=payload.memory_mb,
         min_memory_mb=payload.min_memory_mb,
         port=port,
-        rcon_port=port + 10 if port + 10 < 65535 else free_port(30000, 30100),
+        rcon_port=_pick_rcon_port(port, taken | {port}),
         rcon_password=secrets.token_hex(8),
         auto_start=payload.auto_start,
         auto_restart=payload.auto_restart,
@@ -220,6 +240,23 @@ async def update_server(
         dup = (await session.execute(select(Server).where(Server.name == data["name"], Server.id != server_id))).first()
         if dup:
             raise HTTPException(status.HTTP_409_CONFLICT, "服务器名称已存在")
+
+    rt = manager.get(server_id)
+    new_port = data.get("port", server.port)
+    new_rcon = data.get("rcon_port", server.rcon_port)
+    if new_port == new_rcon:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "游戏端口与 RCON 端口不能相同")
+    if rt.alive and (new_port != server.port or new_rcon != server.rcon_port):
+        # The running JVM keeps listening on the old ports; accepting the edit
+        # would make the panel disagree with reality until the next restart.
+        raise HTTPException(status.HTTP_409_CONFLICT, "服务器运行中不能修改端口，请先停止服务器")
+    if new_port != server.port or new_rcon != server.rcon_port:
+        others = (await session.execute(select(Server).where(Server.id != server_id))).scalars().all()
+        busy = {s.port for s in others} | {s.rcon_port for s in others}
+        clash = busy & {new_port, new_rcon}
+        if clash:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"端口 {', '.join(map(str, sorted(clash)))} 已被其它服务器占用")
+
     for key, value in data.items():
         if value is not None:
             setattr(server, key, value)
@@ -250,6 +287,7 @@ async def delete_server(
     name = server.name
     directory = server.directory
     await session.delete(server)
+    manager.forget(server_id)
     if purge and directory.exists():
         import shutil
 
@@ -355,13 +393,15 @@ async def send_command(
 
 
 @router.get("/{server_id}/logs", dependencies=[Depends(require("server", "read"))])
-async def logs(server_id: int, limit: int = Query(500, ge=1, le=2000)) -> dict:
+async def logs(server_id: int, session: SessionDep, limit: int = Query(500, ge=1, le=2000)) -> dict:
+    await _get(session, server_id)  # 404 instead of an empty phantom runtime
     rt = manager.get(server_id)
     return {"lines": rt.console.snapshot(limit), "state": rt.state, "players": sorted(rt.console.players)}
 
 
 @router.get("/{server_id}/metrics", dependencies=[Depends(require("server", "read"))])
-async def metrics(server_id: int, limit: int = Query(240, ge=10, le=600)) -> dict:
+async def metrics(server_id: int, session: SessionDep, limit: int = Query(240, ge=10, le=600)) -> dict:
+    await _get(session, server_id)
     rt = manager.get(server_id)
     points = list(rt.metrics)[-limit:]
     return {"points": points, "interval": settings.metrics_interval, "state": rt.state}
@@ -375,6 +415,9 @@ async def metrics(server_id: int, limit: int = Query(240, ge=10, le=600)) -> dic
 
 async def _install_task(server_id: int, kind: str, version: str) -> None:
     rt = manager.get(server_id)
+    if rt.alive:
+        bus.publish(topic(server_id, "progress"), {"task": "install", "pct": -1, "stage": "服务器正在运行，安装已取消"})
+        return
     rt.install_pct = 0
     bus.publish(topic(server_id, "progress"), {"task": "install", "pct": 0, "stage": "解析下载地址"})
     try:
@@ -402,6 +445,7 @@ async def _install_task(server_id: int, kind: str, version: str) -> None:
                 progress=on_progress,
             )
             server.version = version
+            server.kind = kind
             s.add(server)
             await s.commit()
         rt.install_pct = 100
@@ -426,8 +470,15 @@ async def install_server(
     version = payload.get("version", server.version)
     if not version:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请指定版本")
+    if kind not in provision.KINDS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "不支持的服务端类型")
     if kind in provision.MANUAL_KINDS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "该类型需要手动上传 jar")
+    rt = manager.get(server_id)
+    if rt.alive:
+        raise HTTPException(status.HTTP_409_CONFLICT, "服务器运行中不能替换服务端 jar，请先停止服务器")
+    if 0 <= rt.install_pct < 100:
+        raise HTTPException(status.HTTP_409_CONFLICT, "已有安装任务在进行中")
     task = asyncio.create_task(_install_task(server_id, kind, version))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
@@ -443,13 +494,14 @@ async def upload_jar(
     actor: User = Depends(require("server", "install")),
 ) -> dict:
     """Manual jar upload for Forge/Bedrock/custom server types."""
-    from fastapi import UploadFile
 
     form = await request.form()
     upload = form.get("file")
     if upload is None or not hasattr(upload, "filename"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "缺少文件")
     server = await _get(session, server_id)
+    if manager.get(server_id).alive:
+        raise HTTPException(status.HTTP_409_CONFLICT, "服务器运行中不能替换 jar，请先停止服务器")
     name = Path(str(upload.filename)).name
     if not name.lower().endswith((".jar", ".zip")):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "仅支持 .jar 或 .zip")

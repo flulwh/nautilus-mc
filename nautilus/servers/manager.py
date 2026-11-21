@@ -19,12 +19,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import secrets
 import shlex
 import signal
 import socket
 import subprocess
-import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -42,6 +40,10 @@ log = logging.getLogger("nautilus.supervisor")
 
 IS_WINDOWS = os.name == "nt"
 MAX_LINE = 4000
+# Crash-restart bookkeeping: give up after this many consecutive crashes, and
+# treat a run longer than the reset window as "healthy" so the counter clears.
+AUTO_RESTART_MAX = 10
+AUTO_RESTART_RESET_S = 300
 
 
 class ManagerError(RuntimeError):
@@ -62,8 +64,10 @@ class Runtime:
     expected_stop: bool = False
     restarts: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    write_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     reader: asyncio.Task | None = None
     waiter: asyncio.Task | None = None
+    autorestart: asyncio.Task | None = None
     install_pct: int = -1
     cpu_prev: tuple[float, float] | None = None
 
@@ -92,20 +96,90 @@ class Runtime:
 
 def free_port(start: int = 25565, end: int = 25665) -> int:
     for port in range(start, end):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                s.bind(("0.0.0.0", port))
-                return port
-            except OSError:
-                continue
+        if not port_in_use(port):
+            return port
     raise ManagerError("没有可用端口")
 
 
-def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+def port_in_use(port: int) -> bool:
+    """True when something already holds ``port``.
+
+    A plain wildcard bind is not enough on Windows: it succeeds even while
+    another socket listens on ``127.0.0.1:port``. ``SO_EXCLUSIVEADDRUSE`` makes
+    the kernel enforce real exclusivity there (it is the documented opposite of
+    ``SO_REUSEADDR``, which we never set), and on POSIX the wildcard bind
+    already conflicts with every specific-address listener.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.4)
-        return s.connect_ex((host, port)) == 0
+        if IS_WINDOWS and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            s.bind(("0.0.0.0", port))
+        except OSError:
+            return True
+        return False
+
+
+def _split_windows(command: str) -> list[str]:
+    """Split a command line with the Windows (CommandLineToArgvW) rules.
+
+    ``shlex.split(posix=False)`` looks like the obvious choice but keeps the
+    quote characters *and* splits inside them (``-Dfoo="bar baz"`` became two
+    arguments), while ``posix=True`` eats backslashes and corrupts Windows
+    paths. Neither is what ``CreateProcess`` does, so the rules are applied
+    here: quotes group, ``\\"`` escapes, ``""`` means a literal quote.
+    """
+    args: list[str] = []
+    buf: list[str] = []
+    in_quotes = False
+    started = False
+    i, n = 0, len(command)
+    while i < n:
+        ch = command[i]
+        if ch in " \t":
+            if in_quotes:
+                buf.append(ch)
+            elif started:
+                args.append("".join(buf))
+                buf, started = [], False
+            i += 1
+            continue
+        started = True
+        if ch == "\\":
+            j = i
+            while j < n and command[j] == "\\":
+                j += 1
+            count = j - i
+            if j < n and command[j] == '"':
+                if count % 2:  # escaped quote, not a delimiter
+                    buf.append("\\" * (count // 2) + '"')
+                else:
+                    buf.append("\\" * (count // 2))
+                    in_quotes = not in_quotes
+                i = j + 1
+            else:
+                buf.append("\\" * count)
+                i = j
+        elif ch == '"':
+            if in_quotes and i + 1 < n and command[i + 1] == '"':
+                buf.append('"')
+                i += 2
+            else:
+                in_quotes = not in_quotes
+                i += 1
+        else:
+            buf.append(ch)
+            i += 1
+    if started:
+        args.append("".join(buf))
+    return args
+
+
+def split_args(command: str) -> list[str]:
+    """Turns the free-form argument strings from the UI into an argv list."""
+    if not command.strip():
+        return []
+    return _split_windows(command) if IS_WINDOWS else shlex.split(command, posix=True)
 
 
 class ServerManager:
@@ -126,6 +200,19 @@ class ServerManager:
     def snapshot(self, server_id: int) -> dict:
         return self.get(server_id).snapshot()
 
+    def forget(self, server_id: int) -> None:
+        """Drop a deleted server's runtime, including its background tasks.
+
+        Without this the supervisor keeps a ``Runtime`` (and the auto-restart
+        task that may be sleeping in it) for every server ever created.
+        """
+        rt = self._rt.pop(server_id, None)
+        if rt is None:
+            return
+        for task in (rt.reader, rt.waiter, rt.autorestart):
+            if task and not task.done():
+                task.cancel()
+
     def _publish_state(self, server_id: int, rt: Runtime) -> None:
         payload = rt.snapshot()
         bus.publish(topic(server_id, "state"), payload)
@@ -141,10 +228,10 @@ class ServerManager:
             "-Dfile.encoding=UTF-8",
         ]
         if server.jvm_args.strip():
-            argv += shlex.split(server.jvm_args, posix=not IS_WINDOWS)
+            argv += split_args(server.jvm_args)
         argv += ["-jar", server.jar]
         if server.server_args.strip():
-            argv += shlex.split(server.server_args, posix=not IS_WINDOWS)
+            argv += split_args(server.server_args)
         return argv
 
     def _prepare_files(self, server: Server) -> Path:
@@ -163,10 +250,16 @@ class ServerManager:
                 "rcon.password": server.rcon_password,
                 "enable-query": "true",
                 "query.port": str(server.rcon_port),
+                # The database is the source of truth for the port: writing it
+                # only for a fresh file let a hand-edited server-port diverge
+                # from the value the panel allocates, displays and preflights.
+                "server-port": str(server.port),
             }
-            if not props_path.exists():
-                values["server-port"] = str(server.port)
             set_properties(props_path, values)
+        elif (directory / "server.properties").exists():
+            # RCON was switched off: make sure a previous run's password does
+            # not keep the port open.
+            set_properties(directory / "server.properties", {"enable-rcon": "false", "enable-query": "false"})
 
         if server.eula_accepted:
             (directory / "eula.txt").write_text(
@@ -181,6 +274,10 @@ class ServerManager:
         async with rt.lock:
             if rt.alive:
                 return rt
+            # A manual start supersedes a pending crash-restart timer.
+            if rt.autorestart and not rt.autorestart.done():
+                rt.autorestart.cancel()
+                rt.autorestart = None
             directory = self._prepare_files(server)
             jar = directory / server.jar
             if not jar.exists():
@@ -200,6 +297,12 @@ class ServerManager:
             rt.state = "starting"
             rt.expected_stop = False
             rt.last_exit_code = None
+            # Let the previous process' pump finish flushing before the buffer
+            # is cleared, otherwise its last lines land in the new session.
+            if rt.reader and not rt.reader.done():
+                _done, pending = await asyncio.wait({rt.reader}, timeout=2)
+                for task in pending:
+                    task.cancel()
             rt.console.clear()
             rt.metrics.clear()
             self._publish_state(server.id, rt)
@@ -286,6 +389,7 @@ class ServerManager:
         if proc is None:
             return
         code = await proc.wait()
+        uptime = time.time() - rt.started_at if rt.started_at else 0
         rt.last_exit_code = code
         rt.proc = None
         rt.ps = None
@@ -296,35 +400,66 @@ class ServerManager:
         bus.publish(topic(server.id, "log"), {"line": f"[nautilus] 进程退出，code={code}", "level": "warn"})
         log.info("server %s exited with %s (expected=%s)", server.id, code, rt.expected_stop)
 
-        if auto and rt.restarts < 10:
+        # A run that lasted a while counts as healthy: without this the crash
+        # counter is exhausted after ten crashes spread over weeks and
+        # auto-restart stays off forever.
+        if uptime > AUTO_RESTART_RESET_S:
+            rt.restarts = 0
+
+        if auto and rt.restarts < AUTO_RESTART_MAX:
             rt.restarts += 1
             delay = min(60, 2 ** min(rt.restarts, 6))
+
+            async def _delayed() -> None:
+                await asyncio.sleep(delay)
+                try:
+                    # A deleted/re-created server must not be resurrected by a
+                    # timer that belongs to the old runtime.
+                    if self._rt.get(server.id) is not rt:
+                        return
+                    from ..db import SessionFactory
+
+                    async with SessionFactory() as s:
+                        fresh = await s.get(Server, server.id)
+                    # Re-read auto_restart: the admin may have switched it off
+                    # while this timer was sleeping.
+                    if fresh and fresh.auto_restart and not rt.expected_stop:
+                        await self.start(fresh)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # pragma: no cover
+                    log.warning("auto restart failed: %s", exc)
+
+            rt.autorestart = asyncio.create_task(_delayed(), name=f"autorestart-{server.id}")
             bus.publish(
                 topic(server.id, "log"),
                 {"line": f"[nautilus] {delay}s 后自动重启（第 {rt.restarts} 次）", "level": "warn"},
             )
 
-            async def _delayed() -> None:
-                await asyncio.sleep(delay)
-                try:
-                    from ..db import SessionFactory
-
-                    async with SessionFactory() as s:
-                        fresh = await s.get(Server, server.id)
-                    if fresh and not rt.expected_stop:
-                        await self.start(fresh)
-                except Exception as exc:  # pragma: no cover
-                    log.warning("auto restart failed: %s", exc)
-
-            asyncio.create_task(_delayed(), name=f"autorestart-{server.id}")
-
     # ------------------------------------------------------------------- stop
+    def _settle(self, rt: Runtime) -> None:
+        """Make sure a dead process never leaves the state at ``stopping``.
+
+        The exit waiter normally publishes the final state, but if that task
+        ever ends early (exception, cancellation) the dashboard would spin on
+        "stopping" forever after the process is already gone.
+        """
+        if rt.alive or rt.state != "stopping":
+            return
+        rt.ps = None
+        rt.stopped_at = rt.stopped_at or time.time()
+        rt.state = "stopped"
+        self._publish_state(rt.server_id, rt)
+
     async def _wait_gone(self, rt: Runtime, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if not rt.alive:
+                self._settle(rt)
                 return True
             await asyncio.sleep(0.25)
+        if not rt.alive:
+            self._settle(rt)
         return not rt.alive
 
     async def stop(self, server: Server, *, force: bool = False) -> Runtime:
@@ -336,6 +471,10 @@ class ServerManager:
                 return rt
 
             rt.expected_stop = True
+            # An explicit stop must win over a queued crash-restart.
+            if rt.autorestart and not rt.autorestart.done():
+                rt.autorestart.cancel()
+                rt.autorestart = None
             was_running = rt.state == "running"
             rt.state = "stopping"
             self._publish_state(server.id, rt)
@@ -419,8 +558,15 @@ class ServerManager:
         proc = rt.proc
         if proc is None or proc.stdin is None or proc.stdin.is_closing():
             raise ManagerError("控制台不可写")
-        proc.stdin.write((command + "\n").encode("utf-8"))
-        await proc.stdin.drain()
+        # Console commands may arrive from HTTP requests, scheduled tasks and
+        # the WebSocket at the same time; interleaved writes would corrupt the
+        # line the server reads.
+        async with rt.write_lock:
+            try:
+                proc.stdin.write((command + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+            except (ConnectionResetError, BrokenPipeError, OSError) as exc:
+                raise ManagerError(f"控制台写入失败：{exc}") from exc
         return ""
 
     # ---------------------------------------------------------------- metrics
@@ -449,7 +595,10 @@ class ServerManager:
                 continue
             # CPU% from cumulative CPU-time deltas: stable across processes that
             # are re-created (children) and independent of psutil's internal state.
-            now = time.time()
+            # The *monotonic* clock is used for the delta: ``time.time()`` can
+            # jump backwards on an NTP correction and would produce a bogus
+            # spike (or a permanent zero) for one sample.
+            now = time.monotonic()
             cpu = 0.0
             if rt.cpu_prev is not None:
                 dt = now - rt.cpu_prev[0]
@@ -480,7 +629,7 @@ class ServerManager:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         for rt in self._rt.values():
-            for t in (rt.reader, rt.waiter):
+            for t in (rt.reader, rt.waiter, rt.autorestart):
                 if t and not t.done():
                     t.cancel()
 

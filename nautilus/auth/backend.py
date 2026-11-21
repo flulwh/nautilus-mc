@@ -36,8 +36,19 @@ async def get_user_db(session: Annotated[AsyncSession, Depends(get_session)]) ->
 #: email -> (failures, locked_until). Process-local on purpose: the panel runs
 #: as a single worker (runtime state is in-process), so this is sufficient.
 _ATTEMPTS: dict[str, tuple[int, float]] = {}
-MAX_ATTEMPTS = 5
-LOCK_SECONDS = 15 * 60
+MAX_ATTEMPTS = max(1, settings.login_max_attempts)
+LOCK_SECONDS = max(1, settings.login_lock_minutes) * 60
+
+
+def _prune_attempts(now: float) -> None:
+    """Bound memory: random usernames must not grow the map forever."""
+    if len(_ATTEMPTS) < 512:
+        return
+    for key, (_failures, locked_until) in list(_ATTEMPTS.items()):
+        if 0 < locked_until <= now:  # expired lock, safe to forget
+            _ATTEMPTS.pop(key, None)
+    if len(_ATTEMPTS) >= 4096:  # sustained spray: start over rather than grow
+        _ATTEMPTS.clear()
 
 
 class UserManager(BaseUserManager[User, int]):
@@ -57,8 +68,10 @@ class UserManager(BaseUserManager[User, int]):
         indistinguishable (no account enumeration).
         """
         key = credentials.username.strip().lower()
+        now = time.time()
+        _prune_attempts(now)
         failures, locked_until = _ATTEMPTS.get(key, (0, 0.0))
-        if locked_until > time.time():
+        if locked_until > now:
             return None
         try:
             user = await super().authenticate(credentials)
@@ -67,7 +80,7 @@ class UserManager(BaseUserManager[User, int]):
         if user is None:
             failures += 1
             if failures >= MAX_ATTEMPTS:
-                _ATTEMPTS[key] = (0, time.time() + LOCK_SECONDS)
+                _ATTEMPTS[key] = (0, now + LOCK_SECONDS)
                 log.warning("login locked for %s after %d failures", key, failures)
             else:
                 _ATTEMPTS[key] = (failures, 0.0)

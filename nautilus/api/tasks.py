@@ -43,10 +43,20 @@ async def _server(session, server_id: int) -> Server:
 
 
 def _check_cron(cron: str) -> None:
+    if not (cron or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "cron 表达式不能为空")
     try:
         svc.make_trigger(cron)
     except svc.TaskError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+def _check_payload(kind: str, payload: str) -> None:
+    """Same rules on create and update: a task that cannot run is not saved."""
+    if kind == "command" and not (payload or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "执行指令类任务需要填写指令内容")
+    if kind == "backup" and (payload or "").strip() not in {"", "world", "config", "full"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "备份范围只能是 world / config / full")
 
 
 @router.get("", dependencies=[Depends(guard)])
@@ -72,10 +82,7 @@ async def create_task(
 ) -> dict:
     server = await _server(session, server_id)
     _check_cron(payload.cron)
-    if payload.kind == "command" and not payload.payload.strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "执行指令类任务需要填写指令内容")
-    if payload.kind == "backup" and payload.payload.strip() not in {"", "world", "config", "full"}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "备份范围只能是 world / config / full")
+    _check_payload(payload.kind, payload.payload)
 
     row = ScheduledTask(
         server_id=server_id,
@@ -116,9 +123,13 @@ async def update_task(
     if row is None or row.server_id != server_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "任务不存在")
     data = payload.model_dump(exclude_unset=True)
-    if "cron" in data and data["cron"]:
-        _check_cron(data["cron"])
-        data["cron"] = " ".join(data["cron"].split())
+    if "cron" in data:
+        _check_cron(data["cron"] or "")
+        data["cron"] = " ".join((data["cron"] or "").split())
+    kind = data.get("kind") or row.kind
+    body = data["payload"] if "payload" in data else row.payload
+    if "kind" in data or "payload" in data:
+        _check_payload(kind, body or "")
     for key, value in data.items():
         if value is not None:
             setattr(row, key, value)
