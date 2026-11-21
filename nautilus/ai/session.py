@@ -217,6 +217,11 @@ def serialize(messages: list[Any]) -> list[dict[str, Any]]:
                         "failed": '"ok": false' in content or "'ok': False" in content,
                     }
                 )
+            elif kind == "ModelResponse" and part_kind == "thinking":
+                # 推理过程也要能回放；压到合理长度，避免历史里塞满长思考。
+                text = _text_of(part)
+                if text.strip():
+                    events.append({"type": "thinking", "text": text[:2000]})
             elif kind == "ModelResponse" and part_kind == "text":
                 text = _text_of(part)
                 if text.strip():

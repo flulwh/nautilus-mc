@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from nautilus.ai import config as ai_config
@@ -760,3 +760,77 @@ async def test_tool_install_project_full_chain(app, monkeypatch):
         ai_tools.reset_ctx(token)
     assert out["ok"] is True, out
     assert out["installed"]["filename"] == "x.jar"
+
+
+async def test_chat_emits_thinking_and_started(admin, monkeypatch):
+    """推理增量必须以 thinking 事件实时给出，且模型调用前先发 started。"""
+    from pydantic_ai.models.function import DeltaThinkingPart
+
+    def fn(messages, info):
+        return ModelResponse(parts=[ThinkingPart("先算一下"), TextPart("结果 42")])
+
+    async def stream(messages, info):
+        # FunctionModel 把同 index 的首个 thinking delta 当起始帧吞掉，
+        # 第二个才真正发 ThinkingPartDelta；真实模型每个 chunk 都是 delta。
+        # 文本拼接由 test_chat_streams_text 覆盖，这里只验证事件类型与顺序。
+        yield {0: DeltaThinkingPart(content="先算一下")}
+        yield {0: DeltaThinkingPart(content="再核对一遍")}
+        yield "结果 42"
+
+    from pydantic_ai.models.function import FunctionModel
+
+    await _enable_ai()
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: FunctionModel(fn, stream_function=stream))
+    r = await admin.post("/api/ai/chat", json={"message": "算个数"})
+    assert r.status_code == 200, r.text
+    events = _events(r.text)
+    types = [e["type"] for e in events]
+    assert "started" in types, f"应当发 started，实际：{types}"
+    assert types.index("started") < types.index("thinking")
+    thinking = [e["delta"] for e in events if e["type"] == "thinking"]
+    assert thinking and any("核对" in t for t in thinking), thinking
+
+
+async def test_openai_compatible_reasoning_content_becomes_thinking(monkeypatch):
+    """真实 OpenAI 兼容 provider 的 reasoning_content 必须被解析成 thinking 增量。
+
+    这验证了 config.build_model 的默认 profile 已能识别 DeepSeek/Moonshot 的
+    reasoning_content 字段，无需额外配置——前端因此能显示推理过程。
+    """
+    import httpx2
+
+    def handler(request):
+        chunks = [
+            {"role": "assistant", "reasoning_content": "先想想"},
+            {"reasoning_content": "再核对"},
+            {"content": "答案 42"},
+            {},
+        ]
+        lines = []
+        for i, delta in enumerate(chunks):
+            fin = "stop" if i == len(chunks) - 1 else None
+            lines.append(
+                'data: {"id":"x","object":"chat.completion.chunk","created":0,"model":"r1",'
+                f'"choices":[{{"index":0,"delta":{json.dumps(delta)},"finish_reason":{json.dumps(fin)}}}]}}\n\n'
+            )
+        lines.append("data: [DONE]\n\n")
+        return httpx2.Response(200, text="".join(lines), headers={"content-type": "text/event-stream"})
+
+    from pydantic_ai import Agent
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    provider = OpenAIProvider(base_url="https://api.deepseek.com/v1", api_key="sk-x", http_client=client)
+    model = OpenAIChatModel("deepseek-reasoner", provider=provider)
+    agent = Agent(model)
+    try:
+        types: list[str] = []
+        async with agent.run_stream_events("算一下") as stream:
+            async for event in stream:
+                delta = getattr(event, "delta", None)
+                if delta is not None:
+                    types.append(type(delta).__name__)
+        assert "ThinkingPartDelta" in types, f"应当解析出思考增量，实际：{types}"
+    finally:
+        await client.aclose()

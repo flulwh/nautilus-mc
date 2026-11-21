@@ -108,8 +108,36 @@ body {
   }
 }
 
+/* AI 思考中的反馈：省略号逐点跳动 + 图标呼吸 */
+.thinking-dots::after {
+  content: "";
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: thinking-ellipsis 1.4s steps(4, end) infinite;
+}
+
+@keyframes thinking-ellipsis {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+  100% { content: ""; }
+}
+
+.thinking-pulse {
+  animation: thinking-breathe 1.3s ease-in-out infinite;
+}
+
+@keyframes thinking-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .chat-caret {
+  .chat-caret,
+  .thinking-dots::after,
+  .thinking-pulse {
     animation: none;
   }
 }

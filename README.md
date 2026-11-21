@@ -165,8 +165,13 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
   用同一个模型把旧轮次摘要化，从用户提问边界开始裁剪，最近 10 轮保持原文。也可以点
   「压缩上下文」手动触发（`POST .../compact`，支持 focus）。压缩过程会发 SSE `compacted` 事件。
 - **工具超时**：只读工具 60s、写操作 120s、安装/恢复 300s，卡住不会拖死整轮。
+- **一发送就有反应**：点发送的同一帧就插入你的消息和「正在思考」骨架；模型调用开始即发
+  SSE `started` 事件切到「思考中」，不用等首个字节，界面不会空白干等。
+- **看得到推理过程**：推理模型（DeepSeek-R1 / qwen3 / o 系列等）的 `reasoning_content` /
+  `reasoning` 会被解析成 SSE `thinking` 事件，在回答上方以可折叠的「思考过程」区实时流式显示，
+  正文开始后自动标记完成。不支持推理的模型则没有这一块。
 - **提示词反馈协议**：提示词要求模型每次调工具前先用一句话说明要做什么；配合前端的
-  状态机（就绪/连接中/生成中/出错）、逐条工具耗时与可展开结果、流式光标，不用猜它在干嘛。
+  状态机（就绪/连接中/思考中/生成中/出错）、逐条工具耗时与可展开结果、流式光标，不用猜它在干嘛。
   每轮还会动态注入当前时间和操作者角色，只读账号会被明确提醒不能写。
 - **权限不旁路**：工具以**当前登录账号**的角色执行，走与 HTTP 路由同一套 Casbin 策略。
   AI 永远不会比调用它的人权限大；每次写操作都进审计日志（`ai.<tool_name>`）。
@@ -395,7 +400,7 @@ GET    /api/ai/conversations            # 当前用户的会话列表（标题/�
 GET    /api/ai/conversations/{id}/messages  # 历史回放事件
 PATCH  /api/ai/conversations/{id}       # 重命名
 POST   /api/ai/conversations/{id}/compact   # 手动压缩（body 可带 focus）
-POST   /api/ai/chat                     # SSE：text / plan / tool_call / tool_result / approval_required / compacted / cancelled / done
+POST   /api/ai/chat                     # SSE：started / thinking / text / plan / tool_call / tool_result / approval_required / compacted / cancelled / done
 POST   /api/ai/approve                  # 批准或拒绝待确认的工具调用，并继续这一轮
 POST   /api/ai/cancel                   # 取消正在运行的对话（真停 agent run，不只是断流）
 GET    /api/audit                       # 审计日志

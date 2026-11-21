@@ -141,6 +141,8 @@ POST /api/ai/chat (SSE)
   → ai/agent.py：build_agent() 用 OpenAI 兼容 provider 装配 pydantic-ai Agent
   → ai/compaction.py：新提问时若历史超阈值 → 模型摘要旧轮次 + SSE compacted
   → agent.run_stream_events()（instructions 注入时间/角色，静态提示词保持前缀稳定）
+      （run 开始前先发 SSE started，前端立刻切“思考中”，不等首字节）
+      PartDeltaEvent(ThinkingPartDelta) → SSE thinking（推理模型，如 reasoning_content）
       PartDeltaEvent(TextPartDelta)   → SSE text
       FunctionToolCallEvent           → SSE tool_call
       DeferredToolRequestsEvent       → SSE approval_required（dangerous 且未开自动确认）

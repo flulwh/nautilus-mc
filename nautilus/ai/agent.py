@@ -37,6 +37,7 @@ from pydantic_ai.messages import (
     FunctionToolResultEvent,
     PartDeltaEvent,
     TextPartDelta,
+    ThinkingPartDelta,
     ToolReturnPart,
 )
 
@@ -293,6 +294,9 @@ async def stream_turn(
     pending: list[dict[str, Any]] | None = None
     captured: list[Any] = []
     saved = False
+    # 让前端尽早从“连接中”切到“思考中”。模型首字节可能要好几秒（尤其推理模型），
+    # 不能让这段时间在界面上是空白的。
+    yield {"type": "started", "model": cfg.model}
     try:
         # 进入 agent 上下文：pydantic-ai 会在这里复用并在退出时关闭 provider 的
         # HTTP client。旧实现每次 run 都新建 Agent 却不关 client，长跑会泄漏连接。
@@ -301,7 +305,13 @@ async def stream_turn(
             async with agent:  # noqa: SIM117 - 三个上下文类型不同，无法合并
                 async with agent.run_stream_events(user_prompt, **kwargs) as events:
                     async for event in events:
-                        if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                        if isinstance(event, PartDeltaEvent) and isinstance(event.delta, ThinkingPartDelta):
+                            # 推理模型的思考增量（DeepSeek-R1 / qwen3 / o 系列经兼容层）。
+                            # 前端用灰色折叠区实时呈现，用户能立刻看到“它在想”。
+                            delta = event.delta.content_delta
+                            if delta:
+                                yield {"type": "thinking", "delta": delta}
+                        elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
                             delta = event.delta.content_delta
                             if delta:
                                 yield {"type": "text", "delta": delta}

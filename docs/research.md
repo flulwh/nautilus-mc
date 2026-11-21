@@ -345,3 +345,20 @@ provider，直接从服务端拉取可选模型。
 协议，收益不足以抵消重写风险；只取可独立落地的模式。压缩没有固定接 tiktoken：
 按字符估算即可触发，避免为一个面板再背一份分词器；模型摘要失败时用确定性摘要兜底，
 不让一次网络抖动把会话拖死。会话仍只在进程内（重启丢失），这与原有设计一致。
+
+---
+
+## 11. 推理过程可视化与即时反馈（2026-11-22）
+
+用户反馈：「对话 UI 反馈不够，要看到 AI 的推理过程，从一发送就要有反应」。
+
+| 上游资料 | 确认到的做法 | 本项目落地 |
+|---|---|---|
+| [pydantic-ai Thinking 能力](https://pydantic.dev/docs/ai/capabilities/thinking/) 与 [流式事件](https://pydantic.dev/docs/ai/core-concepts/streaming/) | 推理内容用 `ThinkingPart` 表示，流式增量是 `PartDeltaEvent(ThinkingPartDelta)`，与 `TextPartDelta` 同属 `ModelResponsePartDelta`；OpenAI 兼容端点原生字段经 profile 解析 | `agent.py` 捕获 `ThinkingPartDelta` 发 SSE `thinking`，前端流式追加到可折叠「思考过程」区 |
+| pydantic-ai `OpenAIChatModel` 源码（本机 2.71 内省） | 未配 profile 时默认检查 `reasoning`（Ollama/gpt-oss）与 `reasoning_content`（DeepSeek/Moonshot）两个字段并转成 ThinkingPart；`openai_chat_send_back_thinking_parts='auto'` 在工具轮次正确回传 | 不改 `build_model`：默认 profile 已覆盖主流国产推理模型，用假 provider 实测 reasoning_content → ThinkingPartDelta 验证通过 |
+| [Vercel AI SDK：generative UI](https://sdk.vercel.ai/docs/ai-sdk-ui/generative-user-interfaces) 与 `useChat` 的 `status` / `streaming` 部件状态 | 工具/推理部件按 state 渲染；提交后立刻给出乐观 UI，不等服务端首字节 | 发送同帧插入用户消息 + 「正在思考」骨架；新增 `submitted → thinking → streaming` 状态机，推理区用 `thinking-dots`/`thinking-pulse` 动画，正文到达即标记推理完成 |
+
+**取舍**：没有接入专用推理 SDK，也没有强制开启 `reasoning_effort`——是否推理由用户所选模型决定，
+面板只负责如实呈现模型返回的思考增量；非推理模型 UI 上自然没有这一块。
+SSE 用新增 `started` 事件解决「首字节前空白」的问题，而不是靠前端定时器假装在动。
+思考内容随会话序列化保存（截断 2000 字符），切换回来仍可回看当时的推理。

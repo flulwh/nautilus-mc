@@ -20,6 +20,7 @@ import { notifications } from "@mantine/notifications";
 import {
   IconAlertTriangle,
   IconArrowUp,
+  IconBrain,
   IconCheck,
   IconMessage,
   IconPencil,
@@ -68,11 +69,15 @@ interface Bubble {
   key: string;
   role: "user" | "assistant" | "note";
   text: string;
+  thinking?: string;
+  thinkingDone?: boolean;
   tools: ToolChip[];
   plan?: PlanView;
   pending?: Pending[];
   error?: string;
   stopped?: boolean;
+  busy?: boolean;
+  startedAt?: number;
   usage?: Record<string, unknown>;
 }
 
@@ -95,11 +100,12 @@ interface HistoryEvent {
   failed?: boolean;
 }
 
-type RunStatus = "ready" | "submitted" | "streaming" | "error" | "stopped";
+type RunStatus = "ready" | "submitted" | "thinking" | "streaming" | "error" | "stopped";
 
 const STATUS: Record<RunStatus, { label: string; color: string }> = {
   ready: { label: "就绪", color: "gray" },
   submitted: { label: "连接中", color: "blue" },
+  thinking: { label: "思考中", color: "grape" },
   streaming: { label: "生成中", color: "teal" },
   error: { label: "出错", color: "red" },
   stopped: { label: "已停止", color: "orange" },
@@ -129,8 +135,14 @@ function eventsToBubbles(events: HistoryEvent[]): Bubble[] {
       out.push({ key: nextKey(), role: "user", text: event.text ?? "", tools: [] });
     } else if (event.type === "note") {
       out.push({ key: nextKey(), role: "note", text: event.text ?? "", tools: [] });
+    } else if (event.type === "thinking") {
+      const bubble = assistant();
+      bubble.thinking = (bubble.thinking ?? "") + (event.text ?? "");
+      bubble.thinkingDone = true;
     } else if (event.type === "text") {
-      assistant().text += event.text ?? "";
+      const bubble = assistant();
+      bubble.thinkingDone = true;
+      bubble.text += event.text ?? "";
     } else if (event.type === "tool_call") {
       assistant().tools.push({
         id: String(event.id ?? ""),
@@ -217,6 +229,7 @@ export function AssistantPage() {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [thinkingFolded, setThinkingFolded] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const activeRef = useRef<string | null>(null);
   const lastPrompt = useRef("");
@@ -253,12 +266,22 @@ export function AssistantPage() {
             setActive(cid);
             void qc.invalidateQueries({ queryKey: ["ai", "conversations"] });
           }
+        } else if (type === "started") {
+          // 模型调用正式开始：立刻从“连接中”切到“思考中”，不等首字节。
+          setStatus("thinking");
+          setStage("模型正在思考…");
+          patchLast((b) => ({ ...b, busy: true, startedAt: b.startedAt ?? Date.now() }));
+        } else if (type === "thinking") {
+          setStatus("thinking");
+          setStage("模型正在思考…");
+          patchLast((b) => ({ ...b, thinking: (b.thinking ?? "") + String(event.delta ?? ""), busy: true }));
         } else if (type === "text") {
           setStatus("streaming");
           setStage("");
-          patchLast((b) => ({ ...b, text: b.text + String(event.delta ?? "") }));
+          patchLast((b) => ({ ...b, thinkingDone: true, text: b.text + String(event.delta ?? "") }));
         } else if (type === "tool_call") {
           setStage(`正在执行 ${String(event.name ?? "")}`);
+          patchLast((b) => ({ ...b, thinkingDone: true }));
           patchLast((b) => ({
             ...b,
             tools: [
@@ -300,11 +323,11 @@ export function AssistantPage() {
         } else if (type === "cancelled") {
           setStatus("stopped");
           setStage("");
-          patchLast((b) => ({ ...b, stopped: true }));
+          patchLast((b) => ({ ...b, stopped: true, busy: false, thinkingDone: true }));
         } else if (type === "error") {
           setStatus("error");
           setStage("");
-          patchLast((b) => ({ ...b, error: String(event.message ?? "未知错误") }));
+          patchLast((b) => ({ ...b, error: String(event.message ?? "未知错误"), busy: false, thinkingDone: true }));
         } else if (type === "done") {
           const pending = (event.pending ?? null) as Pending[] | null;
           const finalText = String(event.text ?? "");
@@ -313,6 +336,8 @@ export function AssistantPage() {
           patchLast((b) => ({
             ...b,
             text: b.text || finalText,
+            busy: false,
+            thinkingDone: true,
             pending: pending ?? b.pending,
             usage: (event.usage ?? b.usage) as Record<string, unknown> | undefined,
           }));
@@ -340,7 +365,16 @@ export function AssistantPage() {
     setInput("");
     lastPrompt.current = text;
     setCompaction("");
-    setBubbles((prev) => [...prev, { key: nextKey(), role: "user", text, tools: [] }, { key: nextKey(), role: "assistant", text: "", tools: [] }]);
+    // 立即（同一帧）插入用户气泡与“正在思考”的助手骨架，不等网络往返。
+    // 这样点击发送的瞬间就有可见反馈。
+    setStatus("submitted");
+    setStage("正在连接模型…");
+    setBusy(true);
+    setBubbles((prev) => [
+      ...prev,
+      { key: nextKey(), role: "user", text, tools: [] },
+      { key: nextKey(), role: "assistant", text: "", tools: [], busy: true, startedAt: Date.now() },
+    ]);
     await consume("/ai/chat", { message: text, conversation_id: activeRef.current });
   };
 
@@ -353,7 +387,10 @@ export function AssistantPage() {
     pending.forEach((item) => {
       approvals[item.id] = approved;
     });
-    patchLast((b) => ({ ...b, pending: undefined }));
+    setBusy(true);
+    setStatus("submitted");
+    setStage("正在继续…");
+    patchLast((b) => ({ ...b, pending: undefined, busy: true, error: undefined }));
     await consume("/ai/approve", { conversation_id: cid, approvals });
   };
 
@@ -629,6 +666,61 @@ export function AssistantPage() {
                   </Text>
                 ) : (
                   <Stack gap={6}>
+                    {bubble.thinking && (
+                      <Box
+                        p="xs"
+                        style={{
+                          borderLeft: "2px solid var(--accent, var(--dim))",
+                          background: "var(--panel-2, var(--panel))",
+                          opacity: 0.92,
+                        }}
+                      >
+                        <Group
+                          gap={6}
+                          wrap="nowrap"
+                          style={{ cursor: "pointer", userSelect: "none" }}
+                          onClick={() => setThinkingFolded((v) => !v)}
+                        >
+                          <IconBrain size={12} color="var(--dim)" />
+                          <Text fz={10.5} fw={600} c="dimmed">
+                            思考过程
+                          </Text>
+                          {bubble.thinkingDone ? (
+                            <Text fz={9.5} c="dimmed">
+                              已完成
+                            </Text>
+                          ) : (
+                            <Text fz={9.5} c="dimmed" className="thinking-dots">
+                              思考中
+                            </Text>
+                          )}
+                          <Text fz={9.5} c="dimmed" style={{ marginLeft: "auto" }}>
+                            {thinkingFolded ? "展开" : "收起"}
+                          </Text>
+                        </Group>
+                        {!thinkingFolded && (
+                          <Text
+                            fz={11}
+                            c="dimmed"
+                            mt={4}
+                            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontStyle: "italic", lineHeight: 1.5 }}
+                          >
+                            {bubble.thinking}
+                            {!bubble.thinkingDone && <span className="chat-caret" />}
+                          </Text>
+                        )}
+                      </Box>
+                    )}
+
+                    {bubble.busy && !bubble.thinking && !bubble.text && (
+                      <Group gap={6} wrap="nowrap">
+                        <IconBrain size={13} color="var(--dim)" className="thinking-pulse" />
+                        <Text fz={11} c="dimmed" className="thinking-dots">
+                          正在思考
+                        </Text>
+                      </Group>
+                    )}
+
                     {bubble.plan && bubble.plan.steps.length > 0 && (
                       <Box p="xs" style={{ borderLeft: "2px solid var(--line)" }}>
                         <Text fz={11} fw={600}>
