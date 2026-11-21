@@ -7,7 +7,7 @@ import { api } from "../api";
 import type { AuditEntry } from "../types";
 
 const ACTION_COLORS: Record<string, string> = {
-  server: "abyss",
+  server: "moss",
   auth: "teal",
   user: "grape",
   config: "orange",
@@ -28,14 +28,13 @@ export function AuditPage() {
   });
 
   return (
-    <Stack gap="lg">
+    <Stack gap="sm">
       <Group justify="space-between" align="flex-end">
         <Box>
-          <Text className="stat-label">Audit trail</Text>
-          <Title order={2} mt={2}>
+          <Text fz={16} fw={600}>
             审计日志
-          </Title>
-          <Text size="11.5px" c="dimmed" mt={4}>
+          </Text>
+          <Text fz={11} c="dimmed" mt={2}>
             所有写操作都会落库：谁、何时、从哪个 IP、对谁做了什么。该表只追加，不提供修改接口。
           </Text>
         </Box>
@@ -132,7 +131,7 @@ export function AuditPage() {
             total={Math.max(1, Math.ceil((audit.data?.total ?? 0) / limit))}
             value={page}
             onChange={setPage}
-            color="abyss"
+            color="moss"
           />
         </Group>
       </Card>

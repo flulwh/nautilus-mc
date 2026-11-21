@@ -1,5 +1,3 @@
-import { Badge } from "@mantine/core";
-
 const LABELS: Record<string, string> = {
   running: "运行中",
   starting: "启动中",
@@ -8,25 +6,12 @@ const LABELS: Record<string, string> = {
   crashed: "已崩溃",
 };
 
-const COLORS: Record<string, string> = {
-  running: "teal",
-  starting: "yellow",
-  stopping: "orange",
-  stopped: "gray",
-  crashed: "red",
-};
-
-export function StatusBadge({ state, size = "sm" }: { state: string; size?: string }) {
+/** State as a square marker plus plain text — no coloured pill. */
+export function StatusBadge({ state }: { state: string }) {
   return (
-    <Badge
-      variant="light"
-      color={COLORS[state] ?? "gray"}
-      size={size}
-      radius="sm"
-      leftSection={<span className={`status-dot ${state}`} style={{ marginRight: -2 }} />}
-      styles={{ label: { display: "flex", alignItems: "center", gap: 6 } }}
-    >
-      {LABELS[state] ?? state}
-    </Badge>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+      <span className={`status-dot ${state}`} />
+      <span className={`status-text ${state}`}>{LABELS[state] ?? state}</span>
+    </span>
   );
 }

@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Badge,
+  Box,
   Button,
   Card,
   Group,
@@ -33,7 +34,7 @@ const KIND_META: Record<string, { label: string; color: string }> = {
   restart: { label: "重启", color: "orange" },
   start: { label: "启动", color: "teal" },
   stop: { label: "停止", color: "gray" },
-  backup: { label: "备份", color: "abyss" },
+  backup: { label: "备份", color: "moss" },
   command: { label: "指令", color: "blue" },
 };
 
@@ -141,7 +142,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
             <Group gap={8}>
               <IconCalendarTime size={16} color="#5d8496" />
               <Title order={4}>定时任务</Title>
-              <Badge size="sm" variant="light" color="abyss">
+              <Badge size="sm" variant="light" color="moss">
                 {tasks.length}
               </Badge>
             </Group>
@@ -150,7 +151,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
               <span className="mono">{list.data?.timezone ?? "面板默认"}</span> 解释。
             </Text>
           </Stack>
-          <Button color="abyss" leftSection={<IconPlus size={15} />} onClick={() => setDraft({ ...EMPTY })}>
+          <Button color="moss" leftSection={<IconPlus size={15} />} onClick={() => setDraft({ ...EMPTY })}>
             新建任务
           </Button>
         </Group>
@@ -222,7 +223,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
                       <Table.Td>
                         <Switch
                           size="sm"
-                          color="abyss"
+                          color="moss"
                           checked={task.enabled}
                           onChange={() => toggle.mutate(task)}
                         />
@@ -272,16 +273,12 @@ export function TasksTab({ serverId }: { serverId: number }) {
             </Table>
           </ScrollArea>
         ) : (
-          <Stack align="center" gap="xs" py={48}>
-            <IconCalendarTime size={28} color="#3d5568" />
-            <Text fw={550}>还没有定时任务</Text>
-            <Text size="sm" c="dimmed" ta="center" maw={440}>
-              常见的组合：每天凌晨自动备份世界、每周一凌晨重启一次释放内存、整点广播一条提示。
+          <Box py={16}>
+            <Text fz={12}>还没有定时任务。</Text>
+            <Text fz={11.5} c="dimmed" mt={4}>
+              常见组合：凌晨自动备份世界、每周重启一次释放内存、整点广播提示。点右上角「新建任务」开始。
             </Text>
-            <Button mt="sm" variant="light" color="abyss" leftSection={<IconPlus size={15} />} onClick={() => setDraft({ ...EMPTY })}>
-              创建第一个任务
-            </Button>
-          </Stack>
+          </Box>
         )}
       </Card>
 
@@ -349,7 +346,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
                     key={preset.cron}
                     size="compact-xs"
                     variant={draft.cron === preset.cron ? "light" : "subtle"}
-                    color="abyss"
+                    color="moss"
                     onClick={() => setDraft({ ...draft, cron: preset.cron })}
                   >
                     {preset.label}
@@ -363,7 +360,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
               <Switch
                 checked={draft.enabled}
                 onChange={(e) => setDraft({ ...draft, enabled: e.currentTarget.checked })}
-                color="abyss"
+                color="moss"
               />
             </Group>
 
@@ -371,7 +368,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
               <Button variant="subtle" color="gray" onClick={() => setDraft(null)}>
                 取消
               </Button>
-              <Button color="abyss" loading={save.isPending} disabled={!draftValid} onClick={() => save.mutate(draft)}>
+              <Button color="moss" loading={save.isPending} disabled={!draftValid} onClick={() => save.mutate(draft)}>
                 {draft.id ? "保存" : "创建"}
               </Button>
             </Group>

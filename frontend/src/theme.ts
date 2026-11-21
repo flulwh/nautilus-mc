@@ -1,54 +1,125 @@
 import { createTheme, rem } from "@mantine/core";
 
-/** Deep-ocean palette: dark glass surfaces, one saturated accent. */
+/**
+ * A plain operations console: flat surfaces, 1px rules, one muted accent,
+ * square corners, no shadows and no gradients. The UI is meant to read like a
+ * tool you leave open in a tab, not like a product page.
+ */
 export const nautilusTheme = createTheme({
-  primaryColor: "abyss",
-  primaryShade: { light: 6, dark: 4 },
-  defaultRadius: "md",
+  primaryColor: "moss",
+  primaryShade: { light: 6, dark: 5 },
+  defaultRadius: 2,
   fontFamily:
-    '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif',
-  fontFamilyMonospace: '"JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace',
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif',
+  fontFamilyMonospace: 'ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace',
+  fontSizes: {
+    xs: rem(11),
+    sm: rem(12),
+    md: rem(13),
+    lg: rem(15),
+    xl: rem(17),
+  },
+  lineHeights: {
+    xs: "1.4",
+    sm: "1.45",
+    md: "1.5",
+    lg: "1.5",
+    xl: "1.4",
+  },
   headings: {
-    fontFamily: '"Inter", "Noto Sans SC", sans-serif',
-    fontWeight: "650",
+    fontFamily: "inherit",
+    fontWeight: "600",
     sizes: {
-      h1: { fontSize: rem(30), lineHeight: "1.2" },
-      h2: { fontSize: rem(22), lineHeight: "1.25" },
-      h3: { fontSize: rem(17), lineHeight: "1.3" },
+      h1: { fontSize: rem(19), lineHeight: "1.3" },
+      h2: { fontSize: rem(16), lineHeight: "1.35" },
+      h3: { fontSize: rem(13.5), lineHeight: "1.4" },
+      h4: { fontSize: rem(12.5), lineHeight: "1.4" },
     },
   },
   colors: {
-    abyss: [
-      "#e8fbff",
-      "#cbf3fb",
-      "#9ce8f7",
-      "#66d9ef",
-      "#35c6e1",
-      "#14adc9",
-      "#0a8ba4",
-      "#0a6f83",
-      "#0c5868",
-      "#0b4553",
+    // Muted grass green. One accent for links, primary buttons and active
+    // states — no second hue, no gradient partner.
+    moss: [
+      "#eef2ec",
+      "#dbe4d6",
+      "#bccdb4",
+      "#9ab38f",
+      "#7a9a6d",
+      "#628253",
+      "#4f6b43",
+      "#3f5637",
+      "#32452c",
+      "#273622",
     ],
-    ink: [
-      "#f4f7fa",
-      "#dfe6ee",
-      "#c2ccd9",
-      "#9aa8b8",
-      "#6f7f92",
-      "#556475",
-      "#3d4a58",
-      "#2a343f",
-      "#1a222b",
-      "#0e141a",
+    // Neutral surfaces for text and borders.
+    slate: [
+      "#e9ecef",
+      "#d6dbe0",
+      "#bcc3cb",
+      "#9aa3ad",
+      "#7a838e",
+      "#616a74",
+      "#4a525b",
+      "#373d45",
+      "#262b31",
+      "#181c21",
+    ],
+    // Semantic colours are damped down on purpose: destructive actions and
+    // warnings should be readable, not shouty.
+    red: [
+      "#f4e8e8",
+      "#e6cfcf",
+      "#d0aaaa",
+      "#b68484",
+      "#9d6666",
+      "#8a5555",
+      "#714545",
+      "#5a3737",
+      "#452a2a",
+      "#331f1f",
+    ],
+    yellow: [
+      "#f4f0e4",
+      "#e6dfc8",
+      "#d0c6a3",
+      "#b6a97c",
+      "#9d8f5f",
+      "#8a7c4e",
+      "#71653f",
+      "#5a5032",
+      "#453d26",
+      "#332d1c",
+    ],
+    teal: [
+      "#e8f0ec",
+      "#d2e0d8",
+      "#b0c9bc",
+      "#8bafa0",
+      "#6d9585",
+      "#567d6d",
+      "#456757",
+      "#374f43",
+      "#2b3e35",
+      "#20302a",
     ],
   },
   components: {
-    Card: { defaultProps: { withBorder: true, radius: "lg" } },
-    Button: { defaultProps: { radius: "md" } },
-    Modal: { defaultProps: { radius: "lg", centered: true } },
-    Table: { defaultProps: { highlightOnHover: true, verticalSpacing: "xs", horizontalSpacing: "sm" } },
-    Tooltip: { defaultProps: { withArrow: true, openDelay: 300 } },
+    Card: { defaultProps: { withBorder: true, radius: 2 } },
+    Paper: { defaultProps: { radius: 2 } },
+    Button: { defaultProps: { radius: 2 } },
+    ActionIcon: { defaultProps: { radius: 2 } },
+    Badge: { defaultProps: { radius: 0 } },
+    Progress: { defaultProps: { radius: 0 } },
+    Modal: { defaultProps: { radius: 2, centered: true, shadow: "none" } },
+    Table: {
+      defaultProps: {
+        highlightOnHover: true,
+        verticalSpacing: 5,
+        horizontalSpacing: 8,
+        fz: 12,
+      },
+    },
+    Tooltip: { defaultProps: { withArrow: false, openDelay: 200, fz: 11 } },
   },
 });
 

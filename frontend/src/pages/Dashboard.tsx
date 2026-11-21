@@ -1,54 +1,27 @@
 import {
-  Badge,
   Box,
   Button,
-  Card,
+  Code,
   Divider,
-  Grid,
   Group,
   Loader,
   Modal,
   NumberInput,
   Select,
-  SimpleGrid,
   Stack,
   Switch,
   Text,
   TextInput,
-  Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import {
-  IconCpu,
-  IconPlus,
-  IconServer2,
-  IconUsers,
-  IconStack2,
-} from "@tabler/icons-react";
+import { IconPlus } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../api";
-import { ServerCard } from "../components/ServerCard";
+import { ServerTable } from "../components/ServerTable";
 import { hasPerm } from "../perm";
 import type { Server } from "../types";
-
-function Stat({ icon, label, value, hint }: { icon: React.ReactNode; label: string; value: string; hint?: string }) {
-  return (
-    <Card className="glass" p="md" withBorder>
-      <Group justify="space-between" mb={6}>
-        <Text className="stat-label">{label}</Text>
-        <Box c="abyss.4">{icon}</Box>
-      </Group>
-      <Text className="stat-value tabular">{value}</Text>
-      {hint && (
-        <Text size="10.5px" c="dimmed" mt={4}>
-          {hint}
-        </Text>
-      )}
-    </Card>
-  );
-}
 
 const KINDS = [
   { value: "paper", label: "Paper · 插件服（推荐）" },
@@ -147,68 +120,76 @@ export function Dashboard() {
   }, [servers.data]);
 
   return (
-    <Stack gap="lg">
-      <Group justify="space-between" align="flex-end">
-        <Box>
-          <Text className="stat-label">Overview</Text>
-          <Title order={2} mt={2}>
-            服务器总览
-          </Title>
-        </Box>
-        <Button leftSection={<IconPlus size={16} />} color="abyss" onClick={() => setOpened(true)}>
-          新建服务器
+    <Stack gap="sm">
+      <Group justify="space-between" align="center">
+        <Group gap={8} align="baseline">
+          <Text fz={16} fw={600}>
+            服务器
+          </Text>
+          <Text fz={11} c="dimmed">
+            {stats.total} 个，{stats.running} 个运行中 · 每 4s 刷新
+          </Text>
+        </Group>
+        <Button size="xs" leftSection={<IconPlus size={13} />} onClick={() => setOpened(true)}>
+          新建
         </Button>
       </Group>
 
-      <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
-        <Stat icon={<IconStack2 size={18} />} label="服务器" value={String(stats.total)} hint={`${stats.running} 个运行中`} />
-        <Stat icon={<IconServer2 size={18} />} label="在线玩家" value={String(stats.players)} hint="实时日志解析" />
-        <Stat icon={<IconCpu size={18} />} label="服务端内存" value={`${stats.mem.toFixed(0)} MB`} hint="进程树合计 RSS" />
-        <Stat icon={<IconUsers size={18} />} label="运行中" value={`${stats.running}`} hint="就绪检测通过" />
-      </SimpleGrid>
+      <div className="stat-strip">
+        <div>
+          <div className="stat-label">服务器</div>
+          <div className="stat-value">{stats.total}</div>
+        </div>
+        <div>
+          <div className="stat-label">运行中</div>
+          <div className="stat-value">{stats.running}</div>
+        </div>
+        <div>
+          <div className="stat-label">在线玩家</div>
+          <div className="stat-value">{stats.players}</div>
+        </div>
+        <div>
+          <div className="stat-label">服务端内存</div>
+          <div className="stat-value">
+            {stats.mem.toFixed(0)}
+            <span style={{ fontSize: 11, color: "var(--dim)", marginLeft: 3 }}>MB</span>
+          </div>
+        </div>
+      </div>
 
       {servers.isLoading ? (
-        <Group justify="center" py="xl">
-          <Loader color="abyss" size="sm" />
+        <Group justify="center" py="lg">
+          <Loader size="xs" color="gray" />
         </Group>
       ) : servers.data?.length ? (
-        <Grid gutter="md">
-          {servers.data.map((server) => (
-            <Grid.Col key={server.id} span={{ base: 12, sm: 6, lg: 4 }}>
-              <ServerCard
-                server={server}
-                canControl={canControl}
-                busy={busyId === server.id}
-                onStart={() => control.mutate({ id: server.id, action: "start" })}
-                onStop={() => control.mutate({ id: server.id, action: "stop" })}
-              />
-            </Grid.Col>
-          ))}
-        </Grid>
+        <ServerTable
+          servers={servers.data}
+          canControl={canControl}
+          busyId={busyId}
+          onStart={(s) => control.mutate({ id: s.id, action: "start" })}
+          onStop={(s) => control.mutate({ id: s.id, action: "stop" })}
+        />
       ) : (
-        <Card className="glass" p={44} withBorder>
-          <Stack align="center" gap="xs">
-            <IconServer2 size={30} color="#3d5568" />
-            <Text fw={550}>还没有服务器</Text>
-            <Text size="sm" c="dimmed" ta="center" maw={420}>
-              新建一个 Paper / Purpur / 原版 / Fabric 服务器，面板会自动从官方源下载 jar
-              并校验哈希，全程不用碰命令行。
-            </Text>
-            <Button mt="sm" leftSection={<IconPlus size={15} />} color="abyss" onClick={() => setOpened(true)}>
-              创建第一个服务器
-            </Button>
-          </Stack>
-        </Card>
+        <Box className="glass" p={20}>
+          <Text fz={12.5}>还没有服务器。</Text>
+          <Text fz={12} c="dimmed" mt={6} maw={560}>
+            Paper / Purpur / 原版 / Fabric 的 jar 由面板从官方源下载并按哈希校验；Forge 与基岩版需要手动上传。
+          </Text>
+          <Button size="xs" mt={12} leftSection={<IconPlus size={13} />} onClick={() => setOpened(true)}>
+            新建服务器
+          </Button>
+        </Box>
       )}
 
-      <Modal opened={opened} onClose={() => setOpened(false)} title="新建服务器" size="lg">
-        <Stack gap="md">
+      <Modal opened={opened} onClose={() => setOpened(false)} title="新建服务器" size="md">
+        <Stack gap="sm">
           <TextInput
             label="名称"
             placeholder="survival-main"
             value={name}
             onChange={(e) => setName(e.currentTarget.value)}
-            description="仅支持字母、数字、点、横线与下划线"
+            description="字母、数字、点、横线与下划线"
+            size="xs"
             required
           />
           <Select
@@ -220,10 +201,11 @@ export function Dashboard() {
               setVersion("");
             }}
             allowDeselect={false}
+            size="xs"
           />
           {["forge", "bedrock", "custom"].includes(kind) ? (
-            <Text size="xs" c="dimmed">
-              该类型没有稳定的公开分发 API，创建后请在详情页手动上传服务端 jar。
+            <Text fz={11.5} c="dimmed">
+              该类型没有稳定的公开分发 API，创建后在详情页手动上传 jar。
             </Text>
           ) : (
             <Select
@@ -233,6 +215,7 @@ export function Dashboard() {
               value={version}
               onChange={(v) => setVersion(v || "")}
               searchable
+              size="xs"
               nothingFoundMessage="没有匹配版本"
             />
           )}
@@ -243,27 +226,34 @@ export function Dashboard() {
             min={512}
             max={32768}
             step={512}
+            size="xs"
           />
           <Divider />
           <Group justify="space-between" align="flex-start" wrap="nowrap">
             <Box>
-              <Text size="sm" fw={550}>
-                接受 Minecraft EULA
-              </Text>
-              <Text size="xs" c="dimmed">
-                启动真实服务端必须同意 Mojang 最终用户许可协议。
+              <Text fz={12}>接受 Minecraft EULA</Text>
+              <Text fz={11} c="dimmed">
+                启动服务端必须同意 Mojang 最终用户许可协议。
               </Text>
             </Box>
-            <Switch checked={eula} onChange={(e) => setEula(e.currentTarget.checked)} color="abyss" />
+            <Switch checked={eula} onChange={(e) => setEula(e.currentTarget.checked)} size="xs" />
           </Group>
-          <Group justify="flex-end" mt="xs">
-            <Button variant="subtle" color="gray" onClick={() => setOpened(false)}>
+          <Group justify="flex-end" gap="xs" mt={4}>
+            <Button variant="default" size="xs" onClick={() => setOpened(false)}>
               取消
             </Button>
-            <Button color="abyss" loading={create.isPending} disabled={name.trim().length < 2 || (!version && !["forge", "bedrock", "custom"].includes(kind))} onClick={() => create.mutate()}>
+            <Button
+              size="xs"
+              loading={create.isPending}
+              disabled={name.trim().length < 2 || (!version && !["forge", "bedrock", "custom"].includes(kind))}
+              onClick={() => create.mutate()}
+            >
               创建并安装
             </Button>
           </Group>
+          <Text fz={10.5} c="dimmed">
+            安装进度写在 <Code fz={10.5}>data/logs/</Code> 与详情页。
+          </Text>
         </Stack>
       </Modal>
     </Stack>

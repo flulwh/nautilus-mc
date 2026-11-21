@@ -51,7 +51,7 @@ const SettingsTab = lazy(() => import("./tabs/SettingsTab").then((m) => ({ defau
 function TabFallback() {
   return (
     <Group justify="center" py="xl">
-      <Loader size="sm" color="abyss" />
+      <Loader size="sm" color="moss" />
     </Group>
   );
 }
@@ -97,7 +97,7 @@ export function ServerDetail() {
   if (server.isLoading) {
     return (
       <Group justify="center" py="xl">
-        <Loader color="abyss" />
+        <Loader color="moss" />
       </Group>
     );
   }
@@ -123,18 +123,18 @@ export function ServerDetail() {
         </Group>
       </Anchor>
 
-      <Card className="glass" p="lg" withBorder>
+      <Card className="glass" p="md" withBorder>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <Box style={{ minWidth: 0 }}>
             <Group gap={10} mb={6}>
-              <Text fw={650} size="xl" style={{ letterSpacing: "-0.01em" }}>
+              <Text fz={15} fw={600}>
                 {s.name}
               </Text>
               <StatusBadge state={state} />
               {installing && (
-                <Badge variant="light" color="yellow" size="sm">
+                <Text fz={11} style={{ color: "var(--warn)" }} className="mono">
                   安装中 {live.install_pct ?? s.runtime.install_pct}%
-                </Badge>
+                </Text>
               )}
             </Group>
             <Group gap="md">
@@ -152,9 +152,9 @@ export function ServerDetail() {
             </Group>
             {!!players.length && (
               <Group gap={6} mt={8}>
-                <IconUsers size={13} color="#5d8496" />
+                <IconUsers size={13} color="var(--dim)" />
                 {players.slice(0, 12).map((p) => (
-                  <Badge key={p} size="xs" variant="light" color="teal">
+                  <Badge key={p} size="xs" variant="default">
                     {p}
                   </Badge>
                 ))}
@@ -170,16 +170,15 @@ export function ServerDetail() {
           <Group gap={6} wrap="nowrap">
             <Tooltip label="刷新">
               <ActionIcon variant="subtle" color="gray" onClick={() => server.refetch()}>
-                <IconRefresh size={16} />
+                <IconRefresh size={14} />
               </ActionIcon>
             </Tooltip>
             {can("control") && (
               <>
                 <Button
                   size="xs"
-                  variant="light"
-                  color="teal"
-                  leftSection={<IconPlayerPlay size={14} />}
+                  variant="default"
+                  leftSection={<IconPlayerPlay size={12} />}
                   loading={control.isPending}
                   disabled={running || installing}
                   onClick={() => control.mutate("start")}
@@ -188,9 +187,8 @@ export function ServerDetail() {
                 </Button>
                 <Button
                   size="xs"
-                  variant="light"
-                  color="orange"
-                  leftSection={<IconPlayerStop size={14} />}
+                  variant="default"
+                  leftSection={<IconPlayerStop size={12} />}
                   disabled={!running}
                   onClick={() => control.mutate("stop")}
                 >
@@ -200,7 +198,7 @@ export function ServerDetail() {
                   size="xs"
                   variant="subtle"
                   color="gray"
-                  leftSection={<IconRefresh size={14} />}
+                  leftSection={<IconRefresh size={12} />}
                   disabled={!running}
                   onClick={() => control.mutate("restart")}
                 >
@@ -212,7 +210,7 @@ export function ServerDetail() {
         </Group>
       </Card>
 
-      <Tabs value={tab} onChange={setTab} variant="pills" radius="md" color="abyss">
+      <Tabs value={tab} onChange={setTab} variant="default" color="moss">
         <Tabs.List className="server-tabs">
           <Tabs.Tab value="console" leftSection={<IconTerminal2 size={14} />}>
             控制台
@@ -243,7 +241,7 @@ export function ServerDetail() {
           </Tabs.Tab>
         </Tabs.List>
 
-        <Tabs.Panel value="console" pt="md">
+        <Tabs.Panel value="console" pt="sm">
           <Suspense fallback={<TabFallback />}>
             <ConsoleTab serverId={serverId} canSend={can("console")} />
           </Suspense>

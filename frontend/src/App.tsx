@@ -3,15 +3,12 @@ import {
   Anchor,
   AppShell,
   Avatar,
-  Badge,
   Box,
   Burger,
   Button,
-  Divider,
   Group,
   Loader,
   Menu,
-  ScrollArea,
   Stack,
   Text,
   Tooltip,
@@ -19,8 +16,6 @@ import {
 } from "@mantine/core";
 import {
   IconActivity,
-  IconBox,
-  IconBucketDroplet,
   IconDashboard,
   IconLogout,
   IconMoon,
@@ -77,7 +72,7 @@ export function App() {
   if (meQuery.isLoading) {
     return (
       <Group h="100vh" justify="center">
-        <Loader color="abyss" />
+        <Loader color="moss" />
       </Group>
     );
   }
@@ -106,48 +101,52 @@ export function App() {
 
   return (
     <AppShell
-      navbar={{ width: 232, breakpoint: "sm", collapsed: { mobile: !navOpen } }}
-      header={{ height: 58 }}
-      padding="lg"
+      navbar={{ width: 200, breakpoint: "sm", collapsed: { mobile: !navOpen } }}
+      header={{ height: 46 }}
+      padding="md"
     >
       <AppShell.Header
         style={{
-          background: "rgba(7,13,20,0.72)",
-          backdropFilter: "blur(14px)",
-          borderBottom: "1px solid var(--nautilus-line)",
+          background: "var(--panel)",
+          borderBottom: "1px solid var(--line)",
         }}
       >
         <Group h="100%" px="md" justify="space-between">
           <Group gap="sm">
             <Burger opened={navOpen} onClick={() => setNavOpen((v) => !v)} hiddenFrom="sm" size="sm" />
-            <Group gap={10}>
+            <Group gap={8} align="center">
               <div className="brand-dot" />
-              <Text fw={700} style={{ letterSpacing: "0.18em", fontSize: 13 }}>
-                NAUTILUS
+              <Text fz={13} fw={600}>
+                Nautilus
               </Text>
-              <Badge variant="light" color="abyss" size="xs" radius="sm">
-                0.1.0
-              </Badge>
+              <Text fz={11} c="dimmed" className="mono">
+                v0.1.0
+              </Text>
             </Group>
           </Group>
 
           <Group gap="xs">
-            <Tooltip label={colorScheme === "dark" ? "切换到亮色" : "切换到暗色"}>
-              <ActionIcon variant="subtle" color="gray" onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")}>
-                {colorScheme === "dark" ? <IconSun size={17} /> : <IconMoon size={17} />}
+            <Tooltip label={colorScheme === "dark" ? "切换亮色" : "切换暗色"}>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")}
+              >
+                {colorScheme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />}
               </ActionIcon>
             </Tooltip>
-            <Menu shadow="md" width={210} position="bottom-end">
+            <Menu width={200} position="bottom-end">
               <Menu.Target>
-                <Group gap={8} style={{ cursor: "pointer" }}>
-                  <Avatar size={28} radius="xl" color="abyss">
+                <Group gap={7} style={{ cursor: "pointer" }}>
+                  <Avatar size={24} radius={2} color="moss">
                     {me.user.username.slice(0, 1).toUpperCase()}
                   </Avatar>
                   <Box visibleFrom="sm">
-                    <Text size="sm" fw={550} lh={1.1}>
+                    <Text size="sm" lh={1.2}>
                       {me.user.username}
                     </Text>
-                    <Text size="10px" c="dimmed" tt="uppercase" style={{ letterSpacing: "0.12em" }}>
+                    <Text size="11px" c="dimmed" lh={1.2}>
                       {me.user.role}
                     </Text>
                   </Box>
@@ -169,45 +168,40 @@ export function App() {
       </AppShell.Header>
 
       <AppShell.Navbar className="shell-nav" p="sm">
-        <Stack gap={4} mt={4}>
+        <Stack gap={2} mt={2} h="100%">
           <div className="section-label">运营</div>
-          <NavLink to="/" icon={<IconDashboard size={16} />} label="总览" active={location.pathname === "/"} />
+          <NavLink to="/" icon={<IconDashboard size={14} />} label="总览" active={location.pathname === "/"} />
           <NavLink
             to="/servers"
-            icon={<IconServer2 size={16} />}
+            icon={<IconServer2 size={14} />}
             label="服务器"
             active={location.pathname.startsWith("/servers")}
           />
           <div className="section-label">治理</div>
           {canAudit && (
-            <NavLink to="/audit" icon={<IconActivity size={16} />} label="审计日志" active={location.pathname === "/audit"} />
+            <NavLink to="/audit" icon={<IconActivity size={14} />} label="审计日志" active={location.pathname === "/audit"} />
           )}
           {isAdmin && (
             <NavLink
               to="/users"
-              icon={<IconShieldLock size={16} />}
+              icon={<IconShieldLock size={14} />}
               label="用户与角色"
               active={location.pathname === "/users"}
             />
           )}
-          <Divider my="sm" color="var(--nautilus-line)" />
-          <div className="section-label">关于</div>
-          <Anchor
-            href="https://github.com/flulwh/nautilus-mc"
-            target="_blank"
-            className="nav-item"
-            underline="never"
-          >
-            <IconBox size={16} />
-            <span>源码仓库</span>
-          </Anchor>
-          <Box px={12} py={10} mt="auto">
-            <Group gap={7}>
-              <IconBucketDroplet size={14} color="#4f6478" />
-              <Text size="10.5px" c="dimmed">
-                FastAPI + Casbin + React
-              </Text>
-            </Group>
+          <Box mt="auto" px={10} py={8}>
+            <Anchor
+              href="https://github.com/flulwh/nautilus-mc"
+              target="_blank"
+              underline="never"
+              fz={11}
+              c="dimmed"
+            >
+              源码仓库
+            </Anchor>
+            <Text fz={10.5} c="dimmed" mt={2} className="mono">
+              fastapi · casbin
+            </Text>
           </Box>
         </Stack>
       </AppShell.Navbar>

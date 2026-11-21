@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Alert,
   Badge,
+  Box,
   Button,
   Card,
   Group,
@@ -130,7 +131,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
               disabled={busy}
             />
             <Button
-              color="abyss"
+              color="moss"
               leftSection={<IconArchive size={15} />}
               loading={busy}
               onClick={() => create.mutate()}
@@ -159,7 +160,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
               value={progress && progress.pct >= 0 ? progress.pct : 100}
               animated={!progress || progress.pct < 0}
               striped
-              color="abyss"
+              color="moss"
               size="sm"
             />
             <Text size="10.5px" c="dimmed" className="mono">
@@ -206,7 +207,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Badge size="sm" variant="light" color={a.scope === "full" ? "orange" : "abyss"}>
+                      <Badge size="sm" variant="light" color={a.scope === "full" ? "orange" : "moss"}>
                         {SCOPE_LABEL[a.scope] ?? a.scope}
                       </Badge>
                     </Table.Td>
@@ -263,13 +264,12 @@ export function BackupsTab({ serverId }: { serverId: number }) {
             </Table>
           </ScrollArea>
         ) : (
-          <Stack align="center" gap="xs" py={48}>
-            <IconArchive size={28} color="#3d5568" />
-            <Text fw={550}>还没有备份</Text>
-            <Text size="sm" c="dimmed" ta="center" maw={420}>
-              备份会打包世界存档和 server.properties。升级版本、装新插件之前按一下，出问题就能一键回到当时的状态。
+          <Box py={16}>
+            <Text fz={12}>还没有备份。</Text>
+            <Text fz={11.5} c="dimmed" mt={4}>
+              备份会打包世界存档和 server.properties；升级版本或装插件前先做一次。
             </Text>
-          </Stack>
+          </Box>
         )}
       </Card>
 

@@ -113,7 +113,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                 {installed.data?.folder ?? "plugins"} 目录 · {installed.data?.installed.length ?? 0} 项
               </Text>
             </Box>
-            <Badge variant="light" color="abyss" size="xs">
+            <Badge variant="light" color="moss" size="xs">
               {installed.data?.kind}
             </Badge>
           </Group>
@@ -200,7 +200,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
 
           {search.isLoading && (
             <Group justify="center" py="xl">
-              <Loader size="sm" color="abyss" />
+              <Loader size="sm" color="moss" />
             </Group>
           )}
           {search.isError && (
@@ -215,7 +215,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                 <Box
                   key={`${item.source}-${item.id}`}
                   p="sm"
-                  style={{ border: "1px solid var(--nautilus-line)", borderRadius: 10 }}
+                  style={{ border: "1px solid var(--line)", borderRadius: 2 }}
                 >
                   <Group justify="space-between" wrap="nowrap" align="flex-start">
                     <Box style={{ minWidth: 0 }}>
@@ -234,7 +234,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                     <Button
                       size="compact-xs"
                       variant="light"
-                      color="abyss"
+                      color="moss"
                       leftSection={<IconVersions size={12} />}
                       onClick={() => setPicking(item)}
                     >
@@ -260,7 +260,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
       <Modal opened={!!picking} onClose={() => setPicking(null)} title={`安装 ${picking?.name ?? ""}`} size="lg">
         {versions.isLoading ? (
           <Group justify="center" py="lg">
-            <Loader size="sm" color="abyss" />
+            <Loader size="sm" color="moss" />
           </Group>
         ) : (
           <Stack gap="xs">
@@ -284,7 +284,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                         <Button
                           size="compact-xs"
                           variant="light"
-                          color="abyss"
+                          color="moss"
                           leftSection={<IconDownload size={12} />}
                           disabled={!v.installable}
                           loading={install.isPending}

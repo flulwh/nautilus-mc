@@ -129,7 +129,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
               <Anchor
                 key={`${c}-${i}`}
                 size="xs"
-                c={i === crumbs.length - 1 ? "abyss.3" : "dimmed"}
+                c={i === crumbs.length - 1 ? "moss.3" : "dimmed"}
                 onClick={() => setPath(crumbs.slice(0, i + 1).join("/"))}
                 style={{ cursor: "pointer" }}
               >
@@ -147,7 +147,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
           <Button size="xs" variant="light" color="gray" leftSection={<IconFolderPlus size={14} />} onClick={() => mkdir.mutate()}>
             新建目录
           </Button>
-          <Button size="xs" variant="light" color="abyss" leftSection={<IconArrowUp size={14} />} onClick={() => fileInput.current?.click()}>
+          <Button size="xs" variant="light" color="moss" leftSection={<IconArrowUp size={14} />} onClick={() => fileInput.current?.click()}>
             上传
           </Button>
           <ActionIcon variant="subtle" color="gray" onClick={() => qc.invalidateQueries({ queryKey: ["files", serverId] })}>
@@ -260,7 +260,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
             <Button variant="subtle" color="gray" onClick={() => setEditing(null)}>
               取消
             </Button>
-            <Button color="abyss" loading={saving} onClick={save}>
+            <Button color="moss" loading={saving} onClick={save}>
               保存
             </Button>
           </Group>

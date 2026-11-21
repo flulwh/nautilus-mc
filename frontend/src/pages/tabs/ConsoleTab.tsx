@@ -133,9 +133,9 @@ export function ConsoleTab({ serverId, canSend }: { serverId: number; canSend: b
               placeholder="输入指令，例如 list / say hello / whitelist add Steve"
               variant="unstyled"
               styles={{ input: { color: "#cfe0ee", fontFamily: "var(--mantine-font-family-monospace)", fontSize: 12.5 } }}
-              leftSection={<Text size="xs" c="abyss.4" className="mono">/</Text>}
+              leftSection={<Text size="xs" c="moss.4" className="mono">/</Text>}
               rightSection={
-                <ActionIcon variant="subtle" color="abyss" onClick={send}>
+                <ActionIcon variant="subtle" color="moss" onClick={send}>
                   <IconCornerDownLeft size={14} />
                 </ActionIcon>
               }

@@ -49,9 +49,9 @@ export function MetricChart({
       scales: { x: { time: true }, y: { range: (_u, _min, max) => [min, max <= 0 ? 10 : max * 1.15] } },
       axes: [
         {
-          stroke: "#5d7183",
-          grid: { stroke: "#16222e", width: 1 },
-          ticks: { stroke: "#16222e", width: 1 },
+          stroke: "#6b747d",
+          grid: { stroke: "#242a31", width: 1 },
+          ticks: { stroke: "#242a31", width: 1 },
           font: "10px Inter, sans-serif",
           // uPlot's default HH:MM:SS labels need ~52px; with 28px they were
           // silently truncated to "-50".
@@ -65,9 +65,9 @@ export function MetricChart({
             }),
         },
         {
-          stroke: "#5d7183",
-          grid: { stroke: "#16222e", width: 1 },
-          ticks: { stroke: "#16222e", width: 1 },
+          stroke: "#6b747d",
+          grid: { stroke: "#242a31", width: 1 },
+          ticks: { stroke: "#242a31", width: 1 },
           font: "10px Inter, sans-serif",
           size: 40,
         },

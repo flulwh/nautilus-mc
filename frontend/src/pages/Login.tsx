@@ -1,5 +1,5 @@
-import { Alert, Box, Button, Group, Paper, PasswordInput, Stack, Text, TextInput, ThemeIcon, Title } from "@mantine/core";
-import { IconAlertCircle, IconArrowRight, IconServer2, IconShieldCheck, IconTerminal2 } from "@tabler/icons-react";
+import { Alert, Box, Button, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
+import { IconAlertCircle } from "@tabler/icons-react";
 import { useState } from "react";
 
 import { api, ApiError } from "../api";
@@ -27,108 +27,78 @@ export function Login({ onSuccess, authError }: { onSuccess: () => void; authErr
   return (
     <div className="login-shell">
       <div className="login-art">
-        <div>
-          <div className="brand-mark">
-            <span className="brand-dot" />
-            Nautilus
-          </div>
-          <Box mt={84}>
-            <h1 className="hero-title">
-              把 Minecraft 服务端
-              <br />
-              装进一个安静的控制台
-            </h1>
-            <p className="hero-sub">
-              进程监管、实时日志、结构化配置、插件市场与细粒度 RBAC —— 全部落在一个
-              FastAPI 进程里。没有守护进程，没有外部中间件，也没有你不需要的复杂度。
-            </p>
-            <div className="hero-metrics">
-              <div className="hero-metric">
-                <strong>5</strong>
-                <span>服务端类型</span>
-              </div>
-              <div className="hero-metric">
-                <strong>4</strong>
-                <span>内置角色</span>
-              </div>
-              <div className="hero-metric">
-                <strong>2</strong>
-                <span>插件源</span>
-              </div>
-            </div>
-          </Box>
+        <div className="brand-mark">
+          <span className="brand-dot" />
+          Nautilus
         </div>
-        <Group gap="xl">
-          {[
-            { icon: <IconTerminal2 size={15} />, label: "RCON 控制台" },
-            { icon: <IconServer2 size={15} />, label: "进程树监控" },
-            { icon: <IconShieldCheck size={15} />, label: "Casbin 鉴权" },
-          ].map((item) => (
-            <Group key={item.label} gap={7}>
-              <ThemeIcon variant="light" color="abyss" size={26} radius="md">
-                {item.icon}
-              </ThemeIcon>
-              <Text size="xs" c="dimmed">
-                {item.label}
-              </Text>
-            </Group>
-          ))}
-        </Group>
+
+        <div className="login-body">
+          <h1 className="hero-title">Minecraft 服务端管理面板</h1>
+          <p className="hero-sub">
+            单进程运行，直接管理服务器目录下的 jar 与配置文件。没有守护进程，也不依赖外部中间件。
+          </p>
+
+          <dl className="spec-list mono">
+            <dt>运行时</dt>
+            <dd>FastAPI · Uvicorn（单 worker）</dd>
+            <dt>鉴权</dt>
+            <dd>Casbin RBAC · HttpOnly Cookie</dd>
+            <dt>存储</dt>
+            <dd>SQLite（WAL）· Alembic 迁移</dd>
+            <dt>进程</dt>
+            <dd>asyncio + psutil 进程树采样</dd>
+            <dt>前端</dt>
+            <dd>React · Vite · Mantine</dd>
+          </dl>
+        </div>
+
+        <Text fz={10.5} c="dimmed" className="mono">
+          nautilus 0.1.0 · MIT
+        </Text>
       </div>
 
-      <Box style={{ display: "grid", placeItems: "center", padding: 32 }}>
-        <Paper w={392} p={34} radius="lg" className="glass">
-          <Stack gap={6} mb={26}>
-            <Text className="stat-label">Sign in</Text>
-            <Title order={2}>登录控制台</Title>
-            <Text size="sm" c="dimmed">
-              使用账号登录。会话保存在 HttpOnly Cookie 中，前端不接触任何令牌。
-            </Text>
-          </Stack>
+      <Box style={{ display: "grid", placeItems: "center", padding: 24 }}>
+        <Box w={320}>
+          <Text fz={13} fw={600} mb={2}>
+            登录
+          </Text>
+          <Text fz={11.5} c="dimmed" mb={16}>
+            使用账号密码登录，会话保存在 HttpOnly Cookie 中。
+          </Text>
 
           <form onSubmit={submit}>
-            <Stack gap="md">
+            <Stack gap="xs">
               <TextInput
                 label="邮箱或用户名"
                 placeholder="admin"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.currentTarget.value)}
                 autoFocus
-                size="md"
+                size="xs"
                 required
               />
               <PasswordInput
                 label="密码"
-                placeholder="••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.currentTarget.value)}
-                size="md"
+                size="xs"
                 required
               />
               {error && (
-                <Alert color="red" variant="light" icon={<IconAlertCircle size={16} />} p="xs">
-                  <Text size="xs">{error}</Text>
+                <Alert color="red" variant="light" icon={<IconAlertCircle size={14} />} p={6}>
+                  <Text fz={11.5}>{error}</Text>
                 </Alert>
               )}
-              <Button
-                type="submit"
-                size="md"
-                color="abyss"
-                loading={loading}
-                rightSection={<IconArrowRight size={16} />}
-                mt={4}
-              >
-                进入面板
+              <Button type="submit" size="xs" loading={loading} mt={4} fullWidth>
+                登录
               </Button>
             </Stack>
           </form>
 
-          <Text size="10.5px" c="dimmed" mt={22} ta="center" style={{ lineHeight: 1.7 }}>
-            首次启动时，初始管理员密码会打印在服务端日志中。
-            <br />
-            连续 5 次失败将锁定该账号 15 分钟。
+          <Text fz={10.5} c="dimmed" mt={18} style={{ lineHeight: 1.7 }}>
+            首次启动时初始管理员密码打印在服务端日志中。连续 5 次失败锁定账号 15 分钟。
           </Text>
-        </Paper>
+        </Box>
       </Box>
     </div>
   );

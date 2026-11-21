@@ -47,12 +47,12 @@ export function MetricsTab({ serverId }: { serverId: number }) {
         <Card className="glass" p="md" withBorder>
           <Group justify="space-between" mb={4}>
             <Text className="stat-label">CPU 占用（进程树合计，可超过 100%）</Text>
-            <Text size="xs" c="abyss.3" className="tabular">
+            <Text size="xs" c="moss.3" className="tabular">
               {latest && Number.isFinite(latest.cpu) ? `${latest.cpu.toFixed(1)}%` : "—"}
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "CPU %", color: "#35c6e1", data: cpu }]} height={190} />
+            <MetricChart timestamps={ts} series={[{ label: "CPU %", color: "#7f9fbf", data: cpu }]} height={190} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               等待采样数据（每 3 秒一次）
@@ -70,7 +70,7 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "RSS (MB)", color: "#a78bfa", data: mem }]} height={170} />
+            <MetricChart timestamps={ts} series={[{ label: "RSS (MB)", color: "#b0a06a", data: mem }]} height={170} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               暂无数据
@@ -88,7 +88,7 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "Players", color: "#2fd39a", data: players }]} height={170} />
+            <MetricChart timestamps={ts} series={[{ label: "Players", color: "#7fa87f", data: players }]} height={170} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               暂无数据

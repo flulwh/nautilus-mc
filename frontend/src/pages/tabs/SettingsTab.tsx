@@ -154,11 +154,11 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
             <Divider my={4} />
             <Group justify="space-between">
               <Text size="sm">面板启动时自动启动</Text>
-              <Switch checked={form.auto_start} onChange={(e) => setForm((f) => ({ ...f, auto_start: e.currentTarget.checked }))} color="abyss" />
+              <Switch checked={form.auto_start} onChange={(e) => setForm((f) => ({ ...f, auto_start: e.currentTarget.checked }))} color="moss" />
             </Group>
             <Group justify="space-between">
               <Text size="sm">崩溃后自动重启（指数退避，最多 10 次）</Text>
-              <Switch checked={form.auto_restart} onChange={(e) => setForm((f) => ({ ...f, auto_restart: e.currentTarget.checked }))} color="abyss" />
+              <Switch checked={form.auto_restart} onChange={(e) => setForm((f) => ({ ...f, auto_restart: e.currentTarget.checked }))} color="moss" />
             </Group>
             <Group justify="space-between">
               <Box>
@@ -167,10 +167,10 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
                   关闭后服务端将拒绝启动
                 </Text>
               </Box>
-              <Switch checked={form.eula_accepted} onChange={(e) => setForm((f) => ({ ...f, eula_accepted: e.currentTarget.checked }))} color="abyss" />
+              <Switch checked={form.eula_accepted} onChange={(e) => setForm((f) => ({ ...f, eula_accepted: e.currentTarget.checked }))} color="moss" />
             </Group>
             <Group justify="flex-end" mt="xs">
-              <Button color="abyss" loading={save.isPending} onClick={() => save.mutate()}>
+              <Button color="moss" loading={save.isPending} onClick={() => save.mutate()}>
                 保存设置
               </Button>
             </Group>
@@ -200,7 +200,7 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
                 />
                 <Button
                   variant="light"
-                  color="abyss"
+                  color="moss"
                   leftSection={<IconDownload size={14} />}
                   loading={install.isPending}
                   onClick={() => install.mutate()}
@@ -238,8 +238,8 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
             />
           </Card>
 
-          <Card className="glass" p="md" withBorder style={{ borderColor: "rgba(226,86,107,0.35)" }}>
-            <Title order={3} mb={4} c="red.3">
+          <Card className="glass" p="md" withBorder style={{ borderColor: "var(--bad)" }}>
+            <Title order={3} mb={4} style={{ color: "var(--bad)" }}>
               危险区域
             </Title>
             <Text size="11px" c="dimmed" mb="sm">

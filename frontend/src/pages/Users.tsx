@@ -12,7 +12,6 @@ import {
   Table,
   Text,
   TextInput,
-  Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconPlus, IconTrash, IconUserShield } from "@tabler/icons-react";
@@ -64,24 +63,23 @@ export function UsersPage() {
   });
 
   return (
-    <Stack gap="lg">
+    <Stack gap="sm">
       <Group justify="space-between" align="flex-end">
         <Box>
-          <Text className="stat-label">Access control</Text>
-          <Title order={2} mt={2}>
+          <Text fz={16} fw={600}>
             用户与角色
-          </Title>
-          <Text size="11.5px" c="dimmed" mt={4}>
+          </Text>
+          <Text fz={11} c="dimmed" mt={2}>
             角色到权限的映射由 Casbin 策略表驱动，支持角色继承（admin → operator → moderator → viewer）。
           </Text>
         </Box>
-        <Button leftSection={<IconPlus size={16} />} color="abyss" onClick={() => setOpened(true)}>
+        <Button size="xs" leftSection={<IconPlus size={13} />} onClick={() => setOpened(true)}>
           新建用户
         </Button>
       </Group>
 
       <Card className="glass" p="md" withBorder>
-        <Table verticalSpacing="sm">
+        <Table verticalSpacing="xs">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>用户</Table.Th>
@@ -183,7 +181,7 @@ export function UsersPage() {
         <Stack gap={4}>
           {Object.entries(ROLE_HINT).map(([role, hint]) => (
             <Group key={role} gap={10}>
-              <Badge size="xs" variant="light" color="abyss" w={92}>
+              <Badge size="xs" variant="light" color="moss" w={92}>
                 {role}
               </Badge>
               <Text size="11px" c="dimmed">
@@ -228,7 +226,7 @@ export function UsersPage() {
               取消
             </Button>
             <Button
-              color="abyss"
+              color="moss"
               loading={create.isPending}
               disabled={!form.username || !form.email || form.password.length < 10}
               onClick={() => create.mutate()}
