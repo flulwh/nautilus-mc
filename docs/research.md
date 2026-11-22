@@ -362,3 +362,29 @@ provider，直接从服务端拉取可选模型。
 面板只负责如实呈现模型返回的思考增量；非推理模型 UI 上自然没有这一块。
 SSE 用新增 `started` 事件解决「首字节前空白」的问题，而不是靠前端定时器假装在动。
 思考内容随会话序列化保存（截断 2000 字符），切换回来仍可回看当时的推理。
+
+---
+
+## 12. Agent 运行轨迹与前端可观测性（2026-11-22）
+
+用户反馈：「提高 agent 能力，前端页面增强，能看到 agent 干了什么、用了什么工具」。
+核心不是再换一套 agent 框架，而是把**已经发生的决策与执行**如实、逐步地呈现出来，
+让耗时与成败有服务端证据，而不是靠前端估算。
+
+| 上游资料 | 确认到的做法 | 本项目落地 |
+|---|---|---|
+| [`munish-shah/Orchestrator-AI-Agent-Platform`](https://github.com/munish-shah/Orchestrator-AI-Agent-Platform) 的 `run_tracker.py` + `Runs.jsx` | 把每个 thought / tool call / result 记成一步，用时间线视图回看整轮运行 | `ai/trace.py`：一次 run 一条 `RunTrace`，逐步记 model / tool / plan / approval / note；前端「执行轨迹」Modal 按 seq 渲染时间线 |
+| [`agentscope-ai/agentscope-studio`](https://github.com/agentscope-ai/agentscope-studio) 的统一事件流与 trace 可视化 | reasoning、工具调用、多模态走同一条事件流；trace 可视化 LLM 调用与 token | 每个 SSE 事件统一带 `run_id` + `seq` + `ts`；`done` 带 usage；轨迹用同一 run_id 串起提问、审批与续跑 |
+| [`agno-agi/agent-ui`](https://github.com/agno-agi/agent-ui)（`nghyane/agent-ui` 镜像） | 工具调用与推理步骤作为结构化部件渲染，按 state 显示 | 前端按 step 的 kind/status 上色：工具失败红、进行中/待确认橙、完成灰；可展开看参数与结果 |
+| [`moulishb/ai-agent-glassbox`](https://github.com/moulishb/ai-agent-glassbox) 的 Full Trajectory Visualization | 强调「每个决策、每次工具调用都可见可审计」 | 工具耗时用 `time.perf_counter()` 在服务端实测（不是浏览器收到事件的间隔）；参数/结果与审计日志一致 |
+
+**实现要点**：审批续跑复用同一个 `run_id`，`begin()` 对已存在的 run 只改状态不丢步骤，
+所以「提问 → 等确认 → 执行」是一条连续时间线；续跑时把上一轮挂着的 `approval` 步收尾成
+`done`，避免轨迹永远停在 waiting。轨迹存进程内（与会话、计划、审批同生命周期），
+按 `MAX_RUNS` LRU 与 6h TTL 清理；删除会话时一并清掉轨迹；越权访问轨迹按 404 处理。
+
+**取舍**：没有引入 LangSmith / OpenTelemetry / Langfuse 这类外部观测后端 —— 它们要额外
+部署服务、上报密钥和网络往返，对单用户面板的排障收益抵不上运维成本；本地进程内轨迹
+已经能回答「哪一步慢、哪个工具失败、参数是什么」。也没有把轨迹落库：它与会话消息同
+生命周期，重启即清，符合现有单 worker 的定位。前端没有把时间线塞进对话气泡逐条重建，
+而是点开 Modal 拉服务端权威轨迹，避免流式事件丢失/乱序导致展示与真实执行不一致。

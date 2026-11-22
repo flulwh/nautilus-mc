@@ -78,6 +78,7 @@
 | 运维手册 | `ai/playbooks.py` | 6 份按需加载的 SOP；常驻上下文只留摘要 | `catalogue() / get()` |
 | 运行控制 | `ai/runs.py` | 每会话一个 `CancellationToken`，支持取消、重复运行保护、僵尸清理 | `runs` |
 | 审批状态 | `ai/approvals.py` | 服务端记录暂停的调用，校验 id 与 TTL，用后即焚 | `approvals` |
+| 运行轨迹 | `ai/trace.py` | 进程内逐步轨迹：每次 run 一个 `run_id`，记录模型推理/工具/计划/审批/压缩各步的服务端真实耗时、参数与结果；审批续跑复用同一 run，TTL/LRU 清理 | `traces / begin() / add_step() / finish()` |
 | MCP | `mcp_server.py` | 官方 `mcp` SDK，stdio / streamable-http，复用同一批工具 | `python -m nautilus.mcp_server` |
 
 ## 4. 关键流程
@@ -137,18 +138,22 @@ def register(app, hooks, bus):
 
 ```
 POST /api/ai/chat (SSE)
-  → api/ai.py：校验 system:read / 模型配置，构造 Ctx(role, user_id, ip, source="panel")
+  → api/ai.py：校验 system:read / 模型配置，构造 Ctx(role, user_id, ip, source="panel")；生成 run_id
   → ai/agent.py：build_agent() 用 OpenAI 兼容 provider 装配 pydantic-ai Agent
-  → ai/compaction.py：新提问时若历史超阈值 → 模型摘要旧轮次 + SSE compacted
+  → ai/trace.py：traces.begin(run_id) 开一条轨迹；每个 SSE 事件带 run_id + seq + ts
+  → ai/compaction.py：新提问时若历史超阈值 → 模型摘要旧轮次 + SSE compacted（轨迹记 note 步）
   → agent.run_stream_events()（instructions 注入时间/角色，静态提示词保持前缀稳定）
-      （run 开始前先发 SSE started，前端立刻切“思考中”，不等首字节）
+      （run 开始前先发 SSE started，前端立刻切“思考中”，不等首字节；轨迹记 model 步）
       PartDeltaEvent(ThinkingPartDelta) → SSE thinking（推理模型，如 reasoning_content）
       PartDeltaEvent(TextPartDelta)   → SSE text
-      FunctionToolCallEvent           → SSE tool_call
-      DeferredToolRequestsEvent       → SSE approval_required（dangerous 且未开自动确认）
-      FunctionToolResultEvent         → SSE tool_result（update_plan 额外发 SSE plan）
-      AgentRunResultEvent             → SSE done（usage / pending）
+      FunctionToolCallEvent           → SSE tool_call（轨迹记 tool 步 running，收尾 model 步）
+      DeferredToolRequestsEvent       → SSE approval_required（轨迹记 approval 步 waiting）
+      FunctionToolResultEvent         → SSE tool_result（轨迹 finish_step 写服务端真实耗时/结果）
+                                        update_plan 额外发 SSE plan（轨迹记 plan 步）
+      AgentRunResultEvent             → SSE done（usage / pending / status）
   → ai/tools.py 包装器：_require(obj, act) → 真实服务函数 → audit.record("ai.<tool>")
+  → 前端 header「执行轨迹」按钮：GET /api/ai/conversations/{id}/runs 列摘要，
+    GET /api/ai/runs/{run_id} 取完整步骤时间线（审批续跑接在同一条 run 后）
 ```
 
 运行控制：
@@ -216,6 +221,8 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | GET | `/api/ai/tools` | `system:read` |
 | GET | `/api/ai/conversations` | `system:read` |
 | GET | `/api/ai/conversations/{id}/messages` | `system:read` |
+| GET | `/api/ai/conversations/{id}/runs` | `system:read`（运行记录摘要） |
+| GET | `/api/ai/runs/{run_id}` | `system:read`（单次完整轨迹，按用户隔离） |
 | PATCH | `/api/ai/conversations/{id}` | `system:read` |
 | POST | `/api/ai/conversations/{id}/compact` | `system:manage` |
 | POST | `/api/ai/chat` | `system:read`（SSE 流式） |

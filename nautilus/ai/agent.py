@@ -15,6 +15,7 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from typing import Any
@@ -45,6 +46,7 @@ from . import approvals as approval_store
 from . import compaction as compact_service
 from . import config as ai_config
 from . import runs, tools
+from . import trace as trace_service
 from .session import conversations
 
 log = logging.getLogger("nautilus.ai.agent")
@@ -238,6 +240,7 @@ async def stream_turn(
     cfg: ai_config.AiConfig,
     approvals: dict[str, bool] | None = None,
     cancellation_token: CancellationToken | None = None,
+    run_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """跑一轮对话，逐条吐出事件。
 
@@ -246,6 +249,9 @@ async def stream_turn(
 
     ``cancellation_token`` 由 HTTP 层预先注册：这样即使流还没开始消费，用户点
     “停止”也能把 run 取消掉。
+
+    ``run_id`` 由 HTTP 层生成，用来把一次提问及其审批续跑串成同一条可回看的轨迹；
+    未传时本地生成一个（直接调用本函数的测试走这条路）。
     """
     if not cfg.enabled:
         yield {"type": "error", "message": "AI 助手未启用，先在「系统设置 -> AI 助手」里打开并填好模型"}
@@ -256,6 +262,51 @@ async def stream_turn(
     except ai_config.AiConfigError as exc:
         yield {"type": "error", "message": str(exc)}
         return
+
+    run_id = run_id or trace_service.traces.new_id()
+    prompt_preview = (prompt or "").strip()[:80]
+    trace_service.traces.begin(run_id, conversation_id, cfg.model, prompt_preview)
+    # 审批续跑：把上一轮挂着的“等待确认”步骤收尾，轨迹才不会永远停在 waiting。
+    if approvals is not None:
+        history_run = trace_service.traces.get(run_id)
+        if history_run is not None:
+            for step in history_run.steps:
+                if step.kind == "approval" and step.status == "waiting":
+                    step.status = "done"
+                    step.duration_ms = max(0, int((time.perf_counter() - step._perf) * 1000))
+
+    # 每个事件都带同一 run_id + 递增 seq + 毫秒时间戳，前端据此重建时间线；
+    # 服务端独立计时，不依赖浏览器收到事件的先后。
+    seq = 0
+
+    def emit(kind: str, **payload: Any) -> dict[str, Any]:
+        nonlocal seq
+        seq += 1
+        return {"type": kind, "run_id": run_id, "seq": seq, "ts": int(time.time() * 1000), **payload}
+
+    # 当前“模型推理/输出”阶段对应的步骤 seq；工具调用会先收尾它，工具返回后再开新的。
+    model_seq: int | None = None
+    model_chars = 0
+    tool_seqs: dict[str, int] = {}
+    final_status = "error"
+    usage: dict[str, Any] | None = None
+
+    def open_model_step() -> None:
+        nonlocal model_seq
+        if model_seq is None:
+            step = trace_service.traces.add_step(run_id, "model", cfg.model)
+            if step is not None:
+                model_seq = step.seq
+
+    def close_model_step() -> None:
+        nonlocal model_seq
+        if model_seq is not None:
+            trace_service.traces.finish_step(
+                run_id,
+                model_seq,
+                detail=f"推理/输出 {model_chars} 字" if model_chars else "",
+            )
+            model_seq = None
 
     history = conversations.get(conversation_id) or []
     # 只在用户新提问时压缩：审批续跑必须原样带着上一轮未处理的工具调用。
@@ -269,12 +320,20 @@ async def stream_turn(
                 summary=info["summary"],
                 compactions=old_count + 1,
             )
-            yield {
-                "type": "compacted",
-                "summary": info["summary"],
-                "saved_chars": info["saved_chars"],
-                "model": info["model"],
-            }
+            trace_service.traces.add_step(
+                run_id,
+                "note",
+                "压缩上下文",
+                status="done",
+                detail=f"省下 {info['saved_chars']} 字符",
+                result=info["summary"][:600],
+            )
+            yield emit(
+                "compacted",
+                summary=info["summary"],
+                saved_chars=info["saved_chars"],
+                model=info["model"],
+            )
 
     kwargs: dict[str, Any] = {
         "message_history": history,
@@ -296,7 +355,8 @@ async def stream_turn(
     saved = False
     # 让前端尽早从“连接中”切到“思考中”。模型首字节可能要好几秒（尤其推理模型），
     # 不能让这段时间在界面上是空白的。
-    yield {"type": "started", "model": cfg.model}
+    open_model_step()
+    yield emit("started", model=cfg.model)
     try:
         # 进入 agent 上下文：pydantic-ai 会在这里复用并在退出时关闭 provider 的
         # HTTP client。旧实现每次 run 都新建 Agent 却不关 client，长跑会泄漏连接。
@@ -310,33 +370,67 @@ async def stream_turn(
                             # 前端用灰色折叠区实时呈现，用户能立刻看到“它在想”。
                             delta = event.delta.content_delta
                             if delta:
-                                yield {"type": "thinking", "delta": delta}
+                                model_chars += len(delta)
+                                yield emit("thinking", delta=delta)
                         elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
                             delta = event.delta.content_delta
                             if delta:
-                                yield {"type": "text", "delta": delta}
+                                model_chars += len(delta)
+                                yield emit("text", delta=delta)
                         elif isinstance(event, FunctionToolCallEvent):
                             part = event.part
-                            yield {
-                                "type": "tool_call",
-                                "id": part.tool_call_id,
-                                "name": part.tool_name,
-                                "args": _tool_args(part.args),
-                                "dangerous": bool(tools.TOOLS.get(part.tool_name) and tools.TOOLS[part.tool_name].dangerous),
-                            }
+                            close_model_step()
+                            args = _tool_args(part.args)
+                            spec = tools.TOOLS.get(part.tool_name)
+                            step = trace_service.traces.add_step(
+                                run_id,
+                                "tool",
+                                part.tool_name,
+                                args=args,
+                                detail=(spec.summary if spec else "")[:600],
+                            )
+                            if step is not None:
+                                tool_seqs[part.tool_call_id] = step.seq
+                            yield emit(
+                                "tool_call",
+                                id=part.tool_call_id,
+                                name=part.tool_name,
+                                args=args,
+                                dangerous=bool(spec and spec.dangerous),
+                                step=step.seq if step else None,
+                            )
                         elif isinstance(event, FunctionToolResultEvent):
                             part = event.part
                             text, failed = _result_text(part.content)
-                            yield {
-                                "type": "tool_result",
-                                "id": part.tool_call_id,
-                                "name": part.tool_name,
-                                "preview": _preview(text),
-                                "failed": failed,
-                            }
+                            step_seq = tool_seqs.pop(part.tool_call_id, None)
+                            duration = trace_service.traces.finish_step(
+                                run_id,
+                                step_seq,
+                                status="failed" if failed else "done",
+                                result=text[:2000],
+                            )
+                            yield emit(
+                                "tool_result",
+                                id=part.tool_call_id,
+                                name=part.tool_name,
+                                preview=_preview(text),
+                                failed=failed,
+                                duration_ms=duration,
+                                step=step_seq,
+                            )
+                            # 结果交回模型后，开启下一轮推理阶段。
+                            open_model_step()
                             if part.tool_name == "update_plan" and not failed:
                                 payload = _jsonable(part.content)
-                                yield {"type": "plan", "plan": payload.get("plan", payload)}
+                                plan = payload.get("plan", payload)
+                                trace_service.traces.add_step(
+                                    run_id,
+                                    "plan",
+                                    "更新任务清单",
+                                    status="done",
+                                    result=_preview(json.dumps(plan, ensure_ascii=False), 1200),
+                                )
+                                yield emit("plan", plan=plan)
                         elif isinstance(event, DeferredToolRequestsEvent):
                             requests = event.requests
                             items = [
@@ -351,7 +445,16 @@ async def stream_turn(
                             if items:
                                 pending = items
                                 approval_store.approvals.remember(conversation_id, items)
-                                yield {"type": "approval_required", "items": items}
+                                close_model_step()
+                                trace_service.traces.add_step(
+                                    run_id,
+                                    "approval",
+                                    "等待人工确认",
+                                    status="waiting",
+                                    args=[{"name": i["name"], "args": i["args"]} for i in items],
+                                    detail=f"{len(items)} 个工具需要确认",
+                                )
+                                yield emit("approval_required", items=items)
                         elif isinstance(event, AgentRunResultEvent):
                             result = event.result
                             output = result.output
@@ -359,11 +462,14 @@ async def stream_turn(
                             final = Turn(text=output if isinstance(output, str) else "", usage=usage)
                             conversations.put(conversation_id, result.all_messages())
                             saved = True
+                            # 有任何待确认工具时是“暂停等确认”，不是完成。
+                            final_status = "waiting_approval" if pending else "done"
     except RunCancelled:
         # 取消时保留已完成的部分：下一次提问不会从“半截工具调用”开始。
         if captured and not saved:
             conversations.put(conversation_id, captured)
-        yield {"type": "cancelled", "message": "已停止；已完成的操作保留在对话里"}
+        final_status = "cancelled"
+        yield emit("cancelled", message="已停止；已完成的操作保留在对话里")
         return
     except asyncio.CancelledError:  # pragma: no cover - 客户端直接断开
         if captured and not saved:
@@ -371,15 +477,23 @@ async def stream_turn(
         raise
     except Exception as exc:  # noqa: BLE001 - 模型/网络错误要变成可读信息
         log.warning("AI 对话失败: %s", exc)
-        yield {"type": "error", "message": f"{type(exc).__name__}: {exc}"}
+        yield emit("error", message=f"{type(exc).__name__}: {exc}")
         return
     finally:
+        close_model_step()
+        trace_service.traces.finish(run_id, final_status, usage=usage)
         tools.reset_ctx(ctx_token)
         if cancellation_token is not None:
             runs.runs.finish(conversation_id, cancellation_token)
 
     if final is None:
-        yield {"type": "error", "message": "模型没有返回结果"}
+        yield emit("error", message="模型没有返回结果")
         return
 
-    yield {"type": "done", "text": final.text, "usage": final.usage, "pending": pending}
+    yield emit(
+        "done",
+        text=final.text,
+        usage=final.usage,
+        pending=pending,
+        status=final_status,
+    )

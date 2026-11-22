@@ -28,6 +28,7 @@ import {
   IconPlus,
   IconRefresh,
   IconRobot,
+  IconRoute,
   IconTerminal2,
   IconTrash,
   IconX,
@@ -100,6 +101,38 @@ interface HistoryEvent {
   failed?: boolean;
 }
 
+/** 服务端记录的单步轨迹。 */
+interface TraceStep {
+  seq: number;
+  kind: "model" | "tool" | "plan" | "approval" | "note";
+  name: string;
+  status: "running" | "done" | "failed" | "waiting" | "stopped";
+  at: number;
+  duration_ms: number | null;
+  args?: unknown;
+  result: string;
+  detail: string;
+}
+
+interface RunSummary {
+  run_id: string;
+  started_at: number;
+  finished_at: number | null;
+  status: string;
+  model: string;
+  prompt: string;
+  steps: number;
+  tools: number;
+  failed: number;
+  duration_ms: number;
+}
+
+interface RunDetail extends Omit<RunSummary, "steps" | "tools" | "failed" | "duration_ms"> {
+  conversation_id: string;
+  usage?: Record<string, unknown> | null;
+  steps: TraceStep[];
+}
+
 type RunStatus = "ready" | "submitted" | "thinking" | "streaming" | "error" | "stopped";
 
 const STATUS: Record<RunStatus, { label: string; color: string }> = {
@@ -119,6 +152,35 @@ function relative(idle: number): string {
   if (idle < 3600) return `${Math.floor(idle / 60)} 分钟前`;
   if (idle < 86400) return `${Math.floor(idle / 3600)} 小时前`;
   return `${Math.floor(idle / 86400)} 天前`;
+}
+
+const TRACE_STEP: Record<string, { label: string; color: string; icon: "model" | "tool" | "plan" | "approval" | "note" }> = {
+  model: { label: "模型推理", color: "grape", icon: "model" },
+  tool: { label: "工具", color: "teal", icon: "tool" },
+  plan: { label: "任务清单", color: "blue", icon: "plan" },
+  approval: { label: "等待确认", color: "orange", icon: "approval" },
+  note: { label: "上下文", color: "gray", icon: "note" },
+};
+
+const TRACE_STATUS: Record<string, { label: string; color: string }> = {
+  running: { label: "进行中", color: "blue" },
+  done: { label: "完成", color: "teal" },
+  failed: { label: "失败", color: "red" },
+  waiting: { label: "待确认", color: "orange" },
+  stopped: { label: "已停止", color: "gray" },
+  done_idle: { label: "完成", color: "gray" },
+};
+
+function duration(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function clock(at: number): string {
+  if (!at) return "";
+  const d = new Date(at);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
 
 /** 历史事件还原成气泡；历史里的工具都已结束，不会显示“运行中”。 */
@@ -230,6 +292,10 @@ export function AssistantPage() {
   const [renameValue, setRenameValue] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [thinkingFolded, setThinkingFolded] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [traceRuns, setTraceRuns] = useState<RunSummary[]>([]);
+  const [traceRun, setTraceRun] = useState<RunDetail | null>(null);
+  const [traceLoading, setTraceLoading] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const activeRef = useRef<string | null>(null);
   const lastPrompt = useRef("");
@@ -482,6 +548,34 @@ export function AssistantPage() {
       return next;
     });
 
+  const loadRun = async (runId: string) => {
+    setTraceLoading(true);
+    try {
+      const data = await api.get<{ run: RunDetail }>(`/ai/runs/${runId}`);
+      setTraceRun(data.run);
+    } catch (exc) {
+      notifications.show({ color: "red", message: `读取轨迹失败：${exc instanceof Error ? exc.message : String(exc)}` });
+    } finally {
+      setTraceLoading(false);
+    }
+  };
+
+  const openTrace = async () => {
+    const cid = activeRef.current;
+    setTraceOpen(true);
+    if (!cid) return;
+    setTraceLoading(true);
+    try {
+      const data = await api.get<{ runs: RunSummary[] }>(`/ai/conversations/${cid}/runs`);
+      setTraceRuns(data.runs);
+      if (data.runs.length > 0) await loadRun(data.runs[0].run_id);
+    } catch (exc) {
+      notifications.show({ color: "red", message: `读取运行记录失败：${exc instanceof Error ? exc.message : String(exc)}` });
+    } finally {
+      setTraceLoading(false);
+    }
+  };
+
   if (config.isError) {
     return (
       <Alert color="red" variant="light" title="无法读取 AI 配置" icon={<IconAlertTriangle size={16} />}>
@@ -619,6 +713,11 @@ export function AssistantPage() {
                 危险操作需确认
               </Badge>
             )}
+            <Tooltip label="查看执行轨迹">
+              <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => void openTrace()} disabled={!activeId} aria-label="执行轨迹">
+                <IconRoute size={14} />
+              </ActionIcon>
+            </Tooltip>
             <Tooltip label="压缩当前会话上下文">
               <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => void compactNow()} disabled={!activeId || busy} aria-label="压缩上下文">
                 <IconRefresh size={14} />
@@ -940,6 +1039,177 @@ export function AssistantPage() {
               保存
             </Button>
           </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={traceOpen}
+        onClose={() => setTraceOpen(false)}
+        title="执行轨迹 · Agent 每一步都记录在这里"
+        size="lg"
+        styles={{ body: { paddingTop: 8 } }}
+      >
+        <Stack gap="sm">
+          <Text fz={11} c="dimmed">
+            耗时是服务端实测；工具参数与结果原样保留，和审计日志一致。审批续跑会接到同一次运行后面。
+          </Text>
+          {traceRuns.length === 0 && !traceLoading && (
+            <Text fz={12} c="dimmed" ta="center" py="xl">
+              这个会话还没有运行记录。发一条消息后再来看。
+            </Text>
+          )}
+          {traceRuns.length > 0 && (
+            <Group gap={4} wrap="wrap">
+              {traceRuns.map((run, i) => {
+                const badge = TRACE_STATUS[run.status] ?? TRACE_STATUS.running;
+                return (
+                  <Button
+                    key={run.run_id}
+                    size="compact-xs"
+                    variant={traceRun?.run_id === run.run_id ? "filled" : "default"}
+                    color={traceRun?.run_id === run.run_id ? badge.color : "gray"}
+                    onClick={() => void loadRun(run.run_id)}
+                  >
+                    #{traceRuns.length - i} · {clock(run.started_at)} · {run.tools} 工具 · {badge.label}
+                  </Button>
+                );
+              })}
+            </Group>
+          )}
+
+          {traceLoading && <Loader size="sm" />}
+
+          {traceRun && !traceLoading && (
+            <>
+              <Group gap={8} wrap="wrap" p="xs" style={{ background: "var(--panel-2, var(--panel))", borderRadius: 4 }}>
+                <Badge size="xs" variant="light" color={(TRACE_STATUS[traceRun.status] ?? TRACE_STATUS.running).color}>
+                  {(TRACE_STATUS[traceRun.status] ?? TRACE_STATUS.running).label}
+                </Badge>
+                <Text fz={10.5} c="dimmed" className="mono">
+                  {traceRun.model}
+                </Text>
+                <Text fz={10.5} c="dimmed">
+                  {traceRun.steps.length} 步 · {duration(traceRun.steps.reduce((n, s) => n + (s.duration_ms ?? 0), 0))} 总耗时
+                </Text>
+                {traceRun.usage && (
+                  <Text fz={10.5} c="dimmed">
+                    输入 {Number(traceRun.usage.input_tokens ?? 0)} / 输出 {Number(traceRun.usage.output_tokens ?? 0)} token
+                  </Text>
+                )}
+              </Group>
+              {traceRun.prompt && (
+                <Text fz={11} truncate title={traceRun.prompt}>
+                  <Text component="span" c="dimmed">
+                    提问：
+                  </Text>
+                  {traceRun.prompt}
+                </Text>
+              )}
+
+              <Stack gap={0} style={{ borderLeft: "1px solid var(--line)", marginLeft: 6 }}>
+                {traceRun.steps.map((step) => {
+                  const meta = TRACE_STEP[step.kind] ?? TRACE_STEP.note;
+                  const stat = TRACE_STATUS[step.status] ?? TRACE_STATUS.running;
+                  const key = `trace-${step.seq}`;
+                  const open = expanded.has(key);
+                  const hasPayload = Boolean(step.detail || step.result || (step.args && JSON.stringify(step.args) !== "{}"));
+                  return (
+                    <Box key={key} pl="sm" py={6} style={{ position: "relative" }}>
+                      <Box
+                        style={{
+                          position: "absolute",
+                          left: -5,
+                          top: 12,
+                          width: 9,
+                          height: 9,
+                          borderRadius: "50%",
+                          background:
+                            step.status === "failed"
+                              ? "var(--red, #e03131)"
+                              : step.status === "running" || step.status === "waiting"
+                                ? "var(--orange, #f08c00)"
+                                : "var(--accent, var(--dim))",
+                          border: "2px solid var(--panel)",
+                        }}
+                      />
+                      <Group gap={6} wrap="nowrap">
+                        <Text fz={9.5} c="dimmed" className="mono" style={{ width: 18 }}>
+                          {String(step.seq).padStart(2, "0")}
+                        </Text>
+                        <Badge size="xs" variant="light" color={meta.color}>
+                          {meta.label}
+                        </Badge>
+                        <Text fz={11} className="mono" truncate>
+                          {step.name || meta.label}
+                        </Text>
+                        <Text fz={9.5} c="dimmed">
+                          {clock(step.at)}
+                        </Text>
+                        <Badge size="xs" variant="light" color={step.status === "done" ? "gray" : stat.color}>
+                          {stat.label}
+                        </Badge>
+                        {step.duration_ms !== null && (
+                          <Text fz={9.5} c="dimmed" style={{ marginLeft: "auto" }} className="mono">
+                            {duration(step.duration_ms)}
+                          </Text>
+                        )}
+                      </Group>
+                      {step.detail && (
+                        <Text fz={10.5} c="dimmed" pl={24} style={{ wordBreak: "break-word" }}>
+                          {step.detail}
+                        </Text>
+                      )}
+                      {hasPayload && (
+                        <>
+                          <Text
+                            fz={10}
+                            c="dimmed"
+                            pl={24}
+                            style={{ cursor: "pointer", userSelect: "none" }}
+                            onClick={() => togglePreview(key)}
+                          >
+                            {open ? "收起详情" : "查看详情 · 参数/结果"}
+                          </Text>
+                          {open && (
+                            <Box pl={24} mt={4}>
+                              {step.args !== undefined && step.args !== null && (
+                                <Text fz={10} c="dimmed" mb={4}>
+                                  参数
+                                </Text>
+                              )}
+                              {step.args !== undefined && step.args !== null && (
+                                <Code
+                                  block
+                                  fz={10}
+                                  style={{ background: "var(--panel)", padding: 6, whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 200, overflow: "auto" }}
+                                >
+                                  {JSON.stringify(step.args, null, 2)}
+                                </Code>
+                              )}
+                              {step.result && (
+                                <>
+                                  <Text fz={10} c="dimmed" mt={6} mb={4}>
+                                    结果
+                                  </Text>
+                                  <Code
+                                    block
+                                    fz={10}
+                                    style={{ background: "var(--panel)", padding: 6, whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 260, overflow: "auto" }}
+                                  >
+                                    {step.result}
+                                  </Code>
+                                </>
+                              )}
+                            </Box>
+                          )}
+                        </>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </>
+          )}
         </Stack>
       </Modal>
     </Group>

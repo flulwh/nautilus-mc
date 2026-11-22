@@ -834,3 +834,142 @@ async def test_openai_compatible_reasoning_content_becomes_thinking(monkeypatch)
         assert "ThinkingPartDelta" in types, f"应当解析出思考增量，实际：{types}"
     finally:
         await client.aclose()
+
+
+# ----------------------------------------------------------------- run trace
+async def test_chat_events_carry_run_id_seq_ts(admin, monkeypatch):
+    """每个事件都带 run_id / seq / ts，工具结果带服务端实测耗时。"""
+    await _enable_ai()
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _tool_then_text("list_servers", {}, "完成"))
+    r = await admin.post("/api/ai/chat", json={"message": "列一下服务器"})
+    events = _events(r.text)
+    assert r.status_code == 200
+    # open 由 HTTP 层发，不带 seq；其余 run 内事件都带同一 run_id + 递增 seq。
+    run_events = [e for e in events if e["type"] != "open"]
+    run_ids = {e.get("run_id") for e in run_events}
+    assert len(run_ids) == 1 and None not in run_ids, run_ids
+    seqs = [e["seq"] for e in run_events]
+    assert seqs == sorted(seqs) and len(seqs) == len(set(seqs)), seqs
+    assert all(isinstance(e.get("ts"), int) and e["ts"] > 0 for e in run_events)
+    assert events[0]["run_id"] == next(iter(run_ids))
+    result = next(e for e in events if e["type"] == "tool_result")
+    assert isinstance(result.get("duration_ms"), int) and result["duration_ms"] >= 0
+    assert isinstance(result.get("step"), int)
+
+
+async def test_run_trace_endpoints_and_isolation(admin, client, monkeypatch):
+    """轨迹端点：摘要列表 + 完整步骤；其他用户按不存在处理。"""
+    from nautilus.ai import trace as trace_store
+
+    trace_store.traces._data.clear()
+    await _enable_ai()
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _tool_then_text("list_servers", {}, "完成"))
+    r = await admin.post("/api/ai/chat", json={"message": "查一下"})
+    events = _events(r.text)
+    cid = events[0]["conversation_id"]
+    run_id = events[0]["run_id"]
+
+    listing = await admin.get(f"/api/ai/conversations/{cid}/runs")
+    assert listing.status_code == 200
+    assert listing.json()["count"] >= 1
+    summary = next(x for x in listing.json()["runs"] if x["run_id"] == run_id)
+    assert summary["tools"] == 1 and summary["failed"] == 0
+    assert summary["status"] == "done" and summary["prompt"] == "查一下"
+
+    detail = await admin.get(f"/api/ai/runs/{run_id}")
+    assert detail.status_code == 200
+    run = detail.json()["run"]
+    assert run["run_id"] == run_id
+    kinds = [s["kind"] for s in run["steps"]]
+    assert "model" in kinds and "tool" in kinds, kinds
+    tool_step = next(s for s in run["steps"] if s["kind"] == "tool")
+    assert tool_step["name"] == "list_servers"
+    assert tool_step["status"] == "done" and isinstance(tool_step["duration_ms"], int)
+    assert '"ok": true' in tool_step["result"]
+
+    # 换个账号不能读别人的轨迹。
+    created = await admin.post(
+        "/api/users",
+        json={
+            "username": "tracer",
+            "email": "tracer@example.com",
+            "password": "TracerPass123",
+            "role": "admin",
+        },
+    )
+    assert created.status_code == 201, created.text
+    await client.post("/api/auth/logout")
+    login = await client.post(
+        "/api/auth/login", data={"username": "tracer@example.com", "password": "TracerPass123"}
+    )
+    assert login.status_code == 204, login.text
+    assert (await client.get(f"/api/ai/runs/{run_id}")).status_code == 404
+    assert (await client.get(f"/api/ai/conversations/{cid}/runs")).json()["count"] == 0
+
+
+async def test_approve_reuses_same_run_id(admin, monkeypatch):
+    """提问 -> 等确认 -> 续跑，应当落在同一条轨迹上。"""
+    from nautilus.ai import trace as trace_store
+
+    trace_store.traces._data.clear()
+    await _enable_ai(auto_approve=False)
+
+    def make_model():
+        def fn(messages, info):
+            for message in messages:
+                for part in getattr(message, "parts", ()):
+                    if type(part).__name__ == "ToolReturnPart":
+                        return ModelResponse(parts=[TextPart("杀掉了")])
+            return ModelResponse(parts=[ToolCallPart("server_kill", {"server_id": 999999})])
+
+        return _as_model(fn)
+
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: make_model())
+    r = await admin.post("/api/ai/chat", json={"message": "强杀服务器"})
+    first = _events(r.text)
+    run_id = first[0]["run_id"]
+    assert any(e["type"] == "approval_required" for e in first)
+    assert next(e for e in first if e["type"] == "done")["status"] == "waiting_approval"
+
+    trace = trace_store.traces.get(run_id)
+    assert trace is not None and trace.status == "waiting_approval"
+    assert any(s["kind"] == "approval" for s in [step.public() for step in trace.steps])
+
+    call = next(e for e in first if e["type"] == "approval_required")["items"][0]
+    r2 = await admin.post(
+        "/api/ai/approve",
+        json={"conversation_id": first[0]["conversation_id"], "approvals": {call["id"]: True}},
+    )
+    second = _events(r2.text)
+    assert {e.get("run_id") for e in second} == {run_id}
+
+    trace = trace_store.traces.get(run_id)
+    assert trace is not None and trace.status == "done"
+    approval_steps = [s for s in trace.steps if s.kind == "approval"]
+    assert len(approval_steps) == 1 and approval_steps[0].status == "done"
+    assert approval_steps[0].duration_ms is not None
+
+
+def test_trace_store_lru_and_ttl(monkeypatch):
+    """轨迹仓库：容量淘汰、按会话清理、步骤上限。"""
+    from nautilus.ai import trace as trace_store
+
+    store = trace_store.TraceStore()
+    monkeypatch.setattr(trace_store, "MAX_RUNS", 3)
+    monkeypatch.setattr(store, "_evict", lambda: _evict(store))
+    ids = []
+    for i in range(5):
+        rid = store.new_id()
+        store.begin(rid, "1:c", "m", f"q{i}")
+        ids.append(rid)
+    assert len(store._data) <= 3
+    assert store.get(ids[-1]) is not None
+    store.drop_conversation("1:c")
+    assert len(store._data) == 0
+
+
+def _evict(store):
+    from nautilus.ai import trace as trace_store
+
+    while len(store._data) > trace_store.MAX_RUNS:
+        store._data.popitem(last=False)

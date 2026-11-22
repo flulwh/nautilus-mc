@@ -21,6 +21,7 @@ from ..ai import config as ai_config
 from ..ai import plan as plan_store
 from ..ai import runs as run_store
 from ..ai import tools as ai_tools
+from ..ai import trace as trace_store
 from ..ai.session import conversations
 from ..audit import record
 from ..deps import SessionDep, UserDep, client_ip, require
@@ -192,6 +193,7 @@ async def chat(payload: ChatIn, session: SessionDep, request: Request, user: Use
         # 两份 run 同时写同一个 message_history 会互相覆盖；明确拒绝比静默丢历史好。
         raise HTTPException(status.HTTP_409_CONFLICT, "这一轮还在运行，先点停止再发新消息")
     token = run_store.runs.register(key)
+    run_id = trace_store.traces.new_id()
     ctx = ai_tools.Ctx(
         role=user.role,
         user_id=user.id,
@@ -202,13 +204,14 @@ async def chat(payload: ChatIn, session: SessionDep, request: Request, user: Use
     )
 
     async def events() -> AsyncIterator[dict[str, Any]]:
-        yield {"type": "open", "conversation_id": conversation_id, "model": cfg.model}
+        yield {"type": "open", "conversation_id": conversation_id, "run_id": run_id, "model": cfg.model}
         async for event in stream_turn(
             prompt=payload.message,
             conversation_id=key,
             ctx=ctx,
             cfg=cfg,
             cancellation_token=token,
+            run_id=run_id,
         ):
             yield event
 
@@ -232,6 +235,9 @@ async def approve(payload: ApproveIn, session: SessionDep, request: Request, use
         raise HTTPException(status.HTTP_409_CONFLICT, "这一轮还在运行，先点停止再确认")
     approval_store.approvals.consume(key)
     token = run_store.runs.register(key)
+    # 审批续跑复用同一条轨迹：把“提问 → 等确认 → 执行”连成一条时间线。
+    waiting = trace_store.traces.latest(key, status="waiting_approval")
+    run_id = waiting.run_id if waiting else trace_store.traces.new_id()
     ctx = ai_tools.Ctx(
         role=user.role,
         user_id=user.id,
@@ -249,6 +255,7 @@ async def approve(payload: ApproveIn, session: SessionDep, request: Request, use
             cfg=cfg,
             approvals=payload.approvals,
             cancellation_token=token,
+            run_id=run_id,
         ):
             yield event
 
@@ -284,6 +291,26 @@ async def conversation_messages(conversation_id: str, user: UserDep) -> dict[str
     if messages is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在或已过期")
     return {"events": serialize(messages), "meta": conversations.meta(key)}
+
+
+@router.get(
+    "/conversations/{conversation_id}/runs",
+    dependencies=[Depends(require("system", "read"))],
+)
+async def conversation_runs(conversation_id: str, user: UserDep) -> dict[str, Any]:
+    """列出某次会话的运行记录摘要（按用户隔离）。"""
+    key = _key(user, conversation_id)
+    runs = trace_store.traces.list_conversation(key)
+    return {"runs": runs, "count": len(runs)}
+
+
+@router.get("/runs/{run_id}", dependencies=[Depends(require("system", "read"))])
+async def run_trace(run_id: str, user: UserDep) -> dict[str, Any]:
+    """单次运行的完整步骤轨迹。轨迹 key 带用户前缀，越权访问按不存在处理。"""
+    trace = trace_store.traces.get(run_id)
+    if trace is None or not trace.conversation_id.startswith(f"{user.id}:"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "运行记录不存在或已过期")
+    return {"run": trace_store.traces.export(run_id)}
 
 
 @router.patch("/conversations/{conversation_id}", dependencies=[Depends(require("system", "read"))])
@@ -328,4 +355,5 @@ async def drop_conversation(conversation_id: str, user: UserDep) -> None:
     run_store.runs.drop(key)
     approval_store.approvals.drop(key)
     plan_store.plans.drop(key)
+    trace_store.traces.drop_conversation(key)
     conversations.drop(key)
