@@ -151,7 +151,7 @@ export function AddressSettings({ canManage }: { canManage: boolean }) {
           </Button>
           <Button
             size="compact-xs"
-            color="moss"
+            color="steelblue"
             disabled={!canManage}
             loading={save.isPending}
             onClick={() =>

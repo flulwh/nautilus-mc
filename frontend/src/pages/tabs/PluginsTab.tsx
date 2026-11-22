@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { useConfirm } from "../../components/Confirm";
 import type { MarketItem, PluginItem } from "../../types";
 
 interface VersionRow {
@@ -43,10 +44,14 @@ function human(n: number): string {
 
 export function PluginsTab({ serverId }: { serverId: number }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [source, setSource] = useState("modrinth");
   const [query, setQuery] = useState("essentials");
   const [submitted, setSubmitted] = useState("essentials");
+  const [offset, setOffset] = useState(0);
+  const [checkUpdates, setCheckUpdates] = useState(false);
   const [picking, setPicking] = useState<MarketItem | null>(null);
+  const PAGE = 20;
 
   const installed = useQuery<{ installed: PluginItem[]; folder: string; kind: string }>({
     queryKey: ["plugins", serverId],
@@ -62,12 +67,26 @@ export function PluginsTab({ serverId }: { serverId: number }) {
     if (!allowsHangar && source === "hangar") setSource("modrinth");
   }, [allowsHangar, source]);
 
+  // 搜索翻页：offset 变化时重新取一页；换关键词/来源时重置到第一页。
+  useEffect(() => setOffset(0), [submitted, source]);
+
   const search = useQuery<{ results: MarketItem[] }>({
-    queryKey: ["plugin-search", serverId, source, submitted],
-    queryFn: () => api.get(`/servers/${serverId}/plugins/search?q=${encodeURIComponent(submitted)}&source=${source}`),
+    queryKey: ["plugin-search", serverId, source, submitted, offset],
+    queryFn: () =>
+      api.get(
+        `/servers/${serverId}/plugins/search?q=${encodeURIComponent(submitted)}&source=${source}&limit=${PAGE}&offset=${offset}`,
+      ),
     enabled: submitted.length > 0,
     retry: false,
   });
+
+  const updates = useQuery<{ updates: { filename: string; installed: string; latest: string; project: string }[] }>({
+    queryKey: ["plugin-updates", serverId],
+    queryFn: () => api.get(`/servers/${serverId}/plugins/updates`),
+    enabled: checkUpdates,
+    retry: false,
+  });
+  const updatable = new Set((updates.data?.updates ?? []).map((u) => u.filename));
 
   const versions = useQuery<{ versions: VersionRow[] }>({
     queryKey: ["plugin-versions", serverId, picking?.source, picking?.id],
@@ -113,9 +132,30 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                 {installed.data?.folder ?? "plugins"} 目录 · {installed.data?.installed.length ?? 0} 项
               </Text>
             </Box>
-            <Badge variant="light" color="moss" size="xs">
-              {installed.data?.kind}
-            </Badge>
+            <Group gap={6}>
+              {updatable.size > 0 && (
+                <Badge variant="light" color="orange" size="xs">
+                  {updatable.size} 个可更新
+                </Badge>
+              )}
+              <Tooltip label="对照 Modrinth 检查已装插件是否有新版本">
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  leftSection={<IconVersions size={12} />}
+                  loading={updates.isFetching}
+                  onClick={() => {
+                    setCheckUpdates(true);
+                    void updates.refetch();
+                  }}
+                >
+                  检查更新
+                </Button>
+              </Tooltip>
+              <Badge variant="light" color="steelblue" size="xs">
+                {installed.data?.kind}
+              </Badge>
+            </Group>
           </Group>
           <ScrollArea h="calc(100vh - 340px)" type="hover" scrollbars="y" offsetScrollbars>
             <Table verticalSpacing={6}>
@@ -133,10 +173,21 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                           <Text size="xs" fw={520} truncate>
                             {p.name || p.filename}
                           </Text>
-                          <Text size="10px" c="dimmed" className="mono" truncate>
-                            {p.version ? `v${p.version}` : p.filename}
-                            {p.api ? ` · api ${p.api}` : ""}
-                          </Text>
+                          <Group gap={4} wrap="nowrap">
+                            <Text size="10px" c="dimmed" className="mono" truncate>
+                              {p.version ? `v${p.version}` : p.filename}
+                              {p.api ? ` · api ${p.api}` : ""}
+                            </Text>
+                            {updatable.has(p.filename) && (
+                              <Tooltip
+                                label={`可更新到 ${updates.data?.updates.find((u) => u.filename === p.filename)?.latest ?? "新版"}`}
+                              >
+                                <Badge size="xs" color="orange" variant="light">
+                                  新版本
+                                </Badge>
+                              </Tooltip>
+                            )}
+                          </Group>
                         </Box>
                       </Group>
                     </Table.Td>
@@ -146,8 +197,10 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                           size="sm"
                           variant="subtle"
                           color="red"
-                          onClick={() => {
-                            if (window.confirm(`删除 ${p.filename}？`)) remove.mutate(p.filename);
+                          onClick={async () => {
+                            if (await confirm({ title: "删除插件", message: `删除 ${p.filename}？重启服务器后生效。`, danger: true })) {
+                              remove.mutate(p.filename);
+                            }
                           }}
                         >
                           <IconTrash size={13} />
@@ -200,7 +253,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
 
           {search.isLoading && (
             <Group justify="center" py="xl">
-              <Loader size="sm" color="moss" />
+              <Loader size="sm" color="steelblue" />
             </Group>
           )}
           {search.isError && (
@@ -234,7 +287,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                     <Button
                       size="compact-xs"
                       variant="light"
-                      color="moss"
+                      color="steelblue"
                       leftSection={<IconVersions size={12} />}
                       onClick={() => setPicking(item)}
                     >
@@ -252,6 +305,31 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                       : "没有结果，换个关键词试试。"}
                 </Text>
               )}
+              {submitted && (
+                <Group justify="space-between" wrap="nowrap">
+                  <Text fz={10} c="dimmed" className="mono">
+                    第 {Math.floor(offset / PAGE) + 1} 页
+                  </Text>
+                  <Group gap={4}>
+                    <Button
+                      size="compact-xs"
+                      variant="default"
+                      disabled={offset === 0 || search.isFetching}
+                      onClick={() => setOffset((o) => Math.max(0, o - PAGE))}
+                    >
+                      上一页
+                    </Button>
+                    <Button
+                      size="compact-xs"
+                      variant="default"
+                      disabled={(search.data?.results.length ?? 0) < PAGE || search.isFetching}
+                      onClick={() => setOffset((o) => o + PAGE)}
+                    >
+                      下一页
+                    </Button>
+                  </Group>
+                </Group>
+              )}
             </Stack>
           </ScrollArea>
         </Card>
@@ -260,7 +338,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
       <Modal opened={!!picking} onClose={() => setPicking(null)} title={`安装 ${picking?.name ?? ""}`} size="lg">
         {versions.isLoading ? (
           <Group justify="center" py="lg">
-            <Loader size="sm" color="moss" />
+            <Loader size="sm" color="steelblue" />
           </Group>
         ) : (
           <Stack gap="xs">
@@ -284,7 +362,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
                         <Button
                           size="compact-xs"
                           variant="light"
-                          color="moss"
+                          color="steelblue"
                           leftSection={<IconDownload size={12} />}
                           disabled={!v.installable}
                           loading={install.isPending}

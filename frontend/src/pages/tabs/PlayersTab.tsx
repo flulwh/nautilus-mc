@@ -222,7 +222,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
               <Group gap={8}>
                 <IconShieldCheck size={16} color="#5d8496" />
                 <Title order={4}>白名单</Title>
-                <Badge size="sm" variant="light" color="moss">
+                <Badge size="sm" variant="light" color="steelblue">
                   {data?.whitelist.length ?? 0}
                 </Badge>
               </Group>
@@ -232,7 +232,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
                 </Text>
                 <Switch
                   size="sm"
-                  color="moss"
+                  color="steelblue"
                   checked={!!data?.whitelist_enabled}
                   disabled={whitelistMode.isPending}
                   onChange={(e) => whitelistMode.mutate(e.currentTarget.checked)}
@@ -252,7 +252,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
               />
               <Button
                 leftSection={<IconUserPlus size={14} />}
-                color="moss"
+                color="steelblue"
                 variant="light"
                 loading={addWhitelist.isPending}
                 disabled={name.trim().length < 2}

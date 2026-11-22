@@ -18,7 +18,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconCheck, IconCopy, IconPlus, IconSend, IconTrash } from "@tabler/icons-react";
+import { IconCheck, IconCopy, IconPlus, IconRefresh, IconSend, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -68,6 +68,27 @@ interface TokenRow {
   expires_at: string | null;
 }
 
+interface SystemInfo {
+  python: string;
+  platform: string;
+  java: string;
+  data_dir: string;
+  servers: number;
+  users: number;
+  now: string;
+}
+
+interface MetaInfo {
+  name: string;
+  version: string;
+  tagline: string;
+  runtime: string;
+  authz_ready: boolean;
+  extensions: string[];
+  server_kinds: string[];
+  limits: Record<string, number>;
+}
+
 const EVENT_LABELS: Record<string, string> = {
   "*": "全部事件",
   "server.started": "服务器启动",
@@ -88,6 +109,17 @@ export function SystemPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.get<Me>("/auth/me"), staleTime: 60_000 });
   const perms = me.data?.permissions ?? [];
   const canManage = perms.includes("*:.*") || perms.includes("system:manage");
+
+  const info = useQuery<SystemInfo>({
+    queryKey: ["system-info"],
+    queryFn: () => api.get<SystemInfo>("/system"),
+    staleTime: 60_000,
+  });
+  const meta = useQuery<MetaInfo>({
+    queryKey: ["system-meta"],
+    queryFn: () => api.get<MetaInfo>("/meta"),
+    staleTime: 300_000,
+  });
 
   // ---------------------------------------------------------------- java
   const java = useQuery<JavaPayload>({
@@ -168,6 +200,48 @@ export function SystemPage() {
 
   return (
     <Grid gutter="md">
+      <Grid.Col span={12}>
+        <Card className="glass" p="md" withBorder>
+          <Group justify="space-between" mb="sm">
+            <Group gap={8}>
+              <Title order={3}>系统信息</Title>
+              {meta.data && (
+                <Badge size="xs" variant="light" color={meta.data.authz_ready ? "teal" : "red"}>
+                  权限引擎{meta.data.authz_ready ? "就绪" : "异常"}
+                </Badge>
+              )}
+            </Group>
+            <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => { void info.refetch(); void meta.refetch(); }} aria-label="刷新">
+              <IconRefresh size={14} />
+            </ActionIcon>
+          </Group>
+          {info.isError || meta.isError ? (
+            <Text fz={12} c="red">读取系统信息失败：{errText(info.error ?? meta.error)}</Text>
+          ) : info.isLoading ? (
+            <Text fz={12} c="dimmed">读取中…</Text>
+          ) : info.data ? (
+            <Grid gutter="xs">
+              {[
+                ["面板", `${meta.data?.name ?? "Nautilus"} v${meta.data?.version ?? "?"}`],
+                ["平台", info.data.platform],
+                ["Python", info.data.python],
+                ["Java（默认）", info.data.java],
+                ["数据目录", info.data.data_dir],
+                ["服务器 / 用户", `${info.data.servers} / ${info.data.users}`],
+                ["运行时", meta.data?.runtime ?? "—"],
+                ["扩展", meta.data?.extensions?.length ? meta.data.extensions.join(", ") : "无"],
+              ].map(([label, value]) => (
+                <Grid.Col key={label} span={{ base: 12, md: 4 }}>
+                  <Group gap={6} wrap="nowrap" align="flex-start">
+                    <Text fz={10.5} c="dimmed" style={{ width: 84, flexShrink: 0 }}>{label}</Text>
+                    <Text fz={11.5} className="mono" style={{ wordBreak: "break-all" }}>{value}</Text>
+                  </Group>
+                </Grid.Col>
+              ))}
+            </Grid>
+          ) : null}
+        </Card>
+      </Grid.Col>
       <Grid.Col span={12}>
         <Card className="glass" p="md" withBorder>
           <Group justify="space-between" mb={4}>
@@ -279,7 +353,7 @@ export function SystemPage() {
                   <Group gap={4} wrap="nowrap">
                     <Switch
                       size="xs"
-                      color="moss"
+                      color="steelblue"
                       checked={hook.enabled}
                       onChange={(e) =>
                         setHooks((all) => all.map((h, i) => (i === index ? { ...h, enabled: e.currentTarget.checked } : h)))
@@ -363,7 +437,7 @@ export function SystemPage() {
               >
                 添加
               </Button>
-              <Button size="xs" color="moss" loading={saveHooks.isPending} disabled={!canManage} onClick={() => saveHooks.mutate()}>
+              <Button size="xs" color="steelblue" loading={saveHooks.isPending} disabled={!canManage} onClick={() => saveHooks.mutate()}>
                 保存通知设置
               </Button>
             </Group>
@@ -399,7 +473,7 @@ export function SystemPage() {
               />
             </Group>
             <Group justify="flex-end">
-              <Button size="xs" color="moss" loading={createToken.isPending} onClick={() => createToken.mutate()}>
+              <Button size="xs" color="steelblue" loading={createToken.isPending} onClick={() => createToken.mutate()}>
                 生成令牌
               </Button>
             </Group>

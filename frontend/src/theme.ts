@@ -1,13 +1,16 @@
 import { createTheme, rem } from "@mantine/core";
 
 /**
- * A plain operations console: flat surfaces, 1px rules, one muted accent,
- * square corners, no shadows and no gradients. The UI is meant to read like a
- * tool you leave open in a tab, not like a product page.
+ * Industrial control console, light scheme.
+ *
+ * A workshop-instrument look: paper-grey surfaces, near-black ink, thin rules,
+ * one utilitarian blue accent, square corners, tabular numerals. No shadows,
+ * no gradients, no rounded toy buttons — it should read like a rack-mount
+ * controller you leave open on a second monitor, not a SaaS landing page.
  */
 export const nautilusTheme = createTheme({
-  primaryColor: "moss",
-  primaryShade: { light: 6, dark: 5 },
+  primaryColor: "steelblue",
+  primaryShade: { light: 7, dark: 5 },
   defaultRadius: 2,
   fontFamily:
     '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif',
@@ -28,7 +31,7 @@ export const nautilusTheme = createTheme({
   },
   headings: {
     fontFamily: "inherit",
-    fontWeight: "600",
+    fontWeight: "700",
     sizes: {
       h1: { fontSize: rem(19), lineHeight: "1.3" },
       h2: { fontSize: rem(16), lineHeight: "1.35" },
@@ -37,78 +40,76 @@ export const nautilusTheme = createTheme({
     },
   },
   colors: {
-    // Muted grass green. One accent for links, primary buttons and active
-    // states — no second hue, no gradient partner.
-    moss: [
-      "#eef2ec",
-      "#dbe4d6",
-      "#bccdb4",
-      "#9ab38f",
-      "#7a9a6d",
-      "#628253",
-      "#4f6b43",
-      "#3f5637",
-      "#32452c",
-      "#273622",
+    // One working accent: instrument-panel blue, usable on light surfaces.
+    steelblue: [
+      "#e8eef4",
+      "#d3e0ec",
+      "#aac3da",
+      "#7ea2c4",
+      "#5783ad",
+      "#3f6b96",
+      "#2f567d",
+      "#244361",
+      "#1b3349",
+      "#132435",
     ],
-    // Neutral surfaces for text and borders.
+    // Cool neutral used for chrome, borders and secondary text.
     slate: [
-      "#e9ecef",
-      "#d6dbe0",
-      "#bcc3cb",
-      "#9aa3ad",
-      "#7a838e",
-      "#616a74",
-      "#4a525b",
-      "#373d45",
-      "#262b31",
-      "#181c21",
+      "#f2f4f6",
+      "#e2e6ea",
+      "#cad0d6",
+      "#aeb6bf",
+      "#8e98a2",
+      "#6f7a85",
+      "#566069",
+      "#3f474e",
+      "#2b3137",
+      "#191d21",
     ],
-    // Semantic colours are damped down on purpose: destructive actions and
-    // warnings should be readable, not shouty.
+    // Damped status colours: legible without turning the page into a traffic light.
     red: [
-      "#f4e8e8",
-      "#e6cfcf",
-      "#d0aaaa",
-      "#b68484",
-      "#9d6666",
-      "#8a5555",
-      "#714545",
-      "#5a3737",
-      "#452a2a",
-      "#331f1f",
+      "#f6eaea",
+      "#e9d1d1",
+      "#d7aeae",
+      "#bd8686",
+      "#a46464",
+      "#8f5151",
+      "#763f3f",
+      "#5d3232",
+      "#442626",
+      "#2f1b1b",
     ],
     yellow: [
-      "#f4f0e4",
-      "#e6dfc8",
-      "#d0c6a3",
-      "#b6a97c",
-      "#9d8f5f",
-      "#8a7c4e",
-      "#71653f",
-      "#5a5032",
-      "#453d26",
-      "#332d1c",
+      "#f6f1e4",
+      "#eae0c9",
+      "#d8c7a1",
+      "#bea974",
+      "#a48a52",
+      "#8d7440",
+      "#755e34",
+      "#5c4a2a",
+      "#433720",
+      "#2f2718",
     ],
     teal: [
-      "#e8f0ec",
-      "#d2e0d8",
-      "#b0c9bc",
-      "#8bafa0",
-      "#6d9585",
-      "#567d6d",
-      "#456757",
-      "#374f43",
-      "#2b3e35",
-      "#20302a",
+      "#e7f1ee",
+      "#cfe2db",
+      "#abcabd",
+      "#82ad9c",
+      "#608f7e",
+      "#487567",
+      "#385d52",
+      "#2c4941",
+      "#213830",
+      "#172723",
     ],
   },
   components: {
     Card: { defaultProps: { withBorder: true, radius: 2 } },
     Paper: { defaultProps: { radius: 2 } },
-    Button: { defaultProps: { radius: 2 } },
-    ActionIcon: { defaultProps: { radius: 2 } },
-    Badge: { defaultProps: { radius: 0 } },
+    Button: { defaultProps: { radius: 2, uppercase: true, fw: 600 } },
+    ActionIcon: { defaultProps: { radius: 2, variant: "subtle" } },
+    Badge: { defaultProps: { radius: 0, tt: "uppercase", fw: 600 } },
     Progress: { defaultProps: { radius: 0 } },
     Modal: { defaultProps: { radius: 2, centered: true, shadow: "none" } },
     Table: {

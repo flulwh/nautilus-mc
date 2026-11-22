@@ -23,8 +23,8 @@
 │                 (只做参数校验、鉴权、编排，不含业务逻辑)      │
 ├─────────────────────────────────────────────────────────┤
 │  AI             ai/(agent,session,config,plan,playbooks,  │
-│                 runs,approvals) · mcp_server              │
-│                 (agent 循环、流式事件、计划/手册、运行控制)  │
+│                 runs,approvals,trace) · mcp_server        │
+│                 (agent 循环、流式事件、轨迹、运行控制)       │
 ├─────────────────────────────────────────────────────────┤
 │  Domain         servers/(manager,rcon,logbus,metrics,     │
 │                 provision) · configs/ · plugins/          │
@@ -40,6 +40,13 @@
 
 依赖方向严格单向：`Interface → AI → Domain → Platform → Infra`。Domain 不 import Interface，Platform 不 import Domain。
 `ai/tools.py` 是唯一例外：它属于 Domain，但会读 authz / audit 这两个 Platform 能力——和 HTTP 路由的鉴权方式完全一致。
+
+**前端（Interface）要点**：React 19 + Mantine 8，默认亮色工业控制台主题（`theme.ts` 的 `steelblue`
+色板 + `styles.css` 两套 CSS 变量），终端/代码编辑器保持独立深色面板。服务端 Tab 按需 `React.lazy`
+分包。权限由 `/auth/me` 返回的展开式 `object:action` 驱动：`perm.ts` 做客户端包含判断，
+`server-perms.tsx` 经 Context 把 `server:<action>` 传给详情 Tab 决定可见性；后端仍是唯一授权点，
+前端隐藏只是避免误导与无效请求。全局 `ConfirmProvider` 提供 Promise 式确认弹窗，
+`AsyncState` 统一列表的空/加载/错误三态，避免查询失败被静默当成空数据。
 
 ## 3. 模块划分与职责
 

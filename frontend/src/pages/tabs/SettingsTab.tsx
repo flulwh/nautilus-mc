@@ -20,10 +20,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { useConfirm } from "../../components/Confirm";
 import type { Server } from "../../types";
 
-export function SettingsTab({ server, onChanged }: { server: Server; onChanged: () => void }) {
+export function SettingsTab({
+  server,
+  onChanged,
+  canDelete = true,
+}: {
+  server: Server;
+  onChanged: () => void;
+  canDelete?: boolean;
+}) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [form, setForm] = useState({
     memory_mb: server.memory_mb,
     min_memory_mb: server.min_memory_mb,
@@ -185,11 +195,11 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
             <Divider my={4} />
             <Group justify="space-between">
               <Text size="sm">面板启动时自动启动</Text>
-              <Switch checked={form.auto_start} onChange={(e) => setForm((f) => ({ ...f, auto_start: e.currentTarget.checked }))} color="moss" />
+              <Switch checked={form.auto_start} onChange={(e) => setForm((f) => ({ ...f, auto_start: e.currentTarget.checked }))} color="steelblue" />
             </Group>
             <Group justify="space-between">
               <Text size="sm">崩溃后自动重启（指数退避，最多 10 次）</Text>
-              <Switch checked={form.auto_restart} onChange={(e) => setForm((f) => ({ ...f, auto_restart: e.currentTarget.checked }))} color="moss" />
+              <Switch checked={form.auto_restart} onChange={(e) => setForm((f) => ({ ...f, auto_restart: e.currentTarget.checked }))} color="steelblue" />
             </Group>
             <Group justify="space-between">
               <Box>
@@ -198,10 +208,10 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
                   关闭后服务端将拒绝启动
                 </Text>
               </Box>
-              <Switch checked={form.eula_accepted} onChange={(e) => setForm((f) => ({ ...f, eula_accepted: e.currentTarget.checked }))} color="moss" />
+              <Switch checked={form.eula_accepted} onChange={(e) => setForm((f) => ({ ...f, eula_accepted: e.currentTarget.checked }))} color="steelblue" />
             </Group>
             <Group justify="flex-end" mt="xs">
-              <Button color="moss" loading={save.isPending} onClick={() => save.mutate()}>
+              <Button color="steelblue" loading={save.isPending} onClick={() => save.mutate()}>
                 保存设置
               </Button>
             </Group>
@@ -231,7 +241,7 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
                 />
                 <Button
                   variant="light"
-                  color="moss"
+                  color="steelblue"
                   leftSection={<IconDownload size={14} />}
                   loading={install.isPending}
                   onClick={() => install.mutate()}
@@ -293,22 +303,24 @@ export function SettingsTab({ server, onChanged }: { server: Server; onChanged: 
               >
                 强制结束进程
               </Button>
-              <Button
-                variant="subtle"
-                color="red"
-                size="xs"
-                onClick={async () => {
-                  if (!window.confirm(`删除 ${server.name} 及其全部文件？此操作不可恢复。`)) return;
-                  try {
-                    await api.del(`/servers/${server.id}?purge=true`);
-                    window.location.assign("/");
-                  } catch (e) {
-                    notifications.show({ color: "red", message: (e as ApiError).detail });
-                  }
-                }}
-              >
-                删除服务器
-              </Button>
+              {canDelete && (
+                <Button
+                  variant="subtle"
+                  color="red"
+                  size="xs"
+                  onClick={async () => {
+                    if (!(await confirm({ title: "删除服务器", message: `删除 ${server.name} 及其全部文件？此操作不可恢复。`, danger: true }))) return;
+                    try {
+                      await api.del(`/servers/${server.id}?purge=true`);
+                      window.location.assign("/");
+                    } catch (e) {
+                      notifications.show({ color: "red", message: (e as ApiError).detail });
+                    }
+                  }}
+                >
+                  删除服务器
+                </Button>
+              )}
             </Group>
           </Card>
         </Stack>

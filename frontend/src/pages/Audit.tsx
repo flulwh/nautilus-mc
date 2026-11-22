@@ -1,5 +1,5 @@
-import { Badge, Box, Card, Group, Pagination, Select, Stack, Table, Text, TextInput, Title } from "@mantine/core";
-import { IconActivity } from "@tabler/icons-react";
+import { Badge, Box, Button, Card, Code, Group, Pagination, Select, Stack, Table, Text, TextInput } from "@mantine/core";
+import { IconActivity, IconDownload } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -7,7 +7,7 @@ import { api } from "../api";
 import type { AuditEntry } from "../types";
 
 const ACTION_COLORS: Record<string, string> = {
-  server: "moss",
+  server: "steelblue",
   auth: "teal",
   user: "grape",
   config: "orange",
@@ -19,6 +19,7 @@ export function AuditPage() {
   const [page, setPage] = useState(1);
   const [action, setAction] = useState("");
   const [actor, setActor] = useState("");
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const limit = 30;
 
   const audit = useQuery<{ total: number; entries: AuditEntry[] }>({
@@ -26,6 +27,44 @@ export function AuditPage() {
     queryFn: () =>
       api.get(`/audit?limit=${limit}&offset=${(page - 1) * limit}&action=${encodeURIComponent(action)}&actor=${encodeURIComponent(actor)}`),
   });
+
+  const toggleDetail = (id: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const exportCsv = () => {
+    const rows = audit.data?.entries ?? [];
+    const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [
+      ["时间", "操作者", "动作", "目标", "来源IP", "结果", "详情"]
+        .map(cell)
+        .join(","),
+      ...rows.map((e) =>
+        [
+          e.ts ? new Date(e.ts).toLocaleString("zh-CN") : "",
+          e.actor,
+          e.action,
+          e.target,
+          e.ip,
+          e.ok ? "成功" : "失败",
+          JSON.stringify(e.detail ?? {}),
+        ]
+          .map(cell)
+          .join(","),
+      ),
+    ];
+    const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nautilus-audit-page${page}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <Stack gap="sm">
@@ -39,6 +78,15 @@ export function AuditPage() {
           </Text>
         </Box>
         <Group gap="xs">
+          <Button
+            size="xs"
+            variant="default"
+            leftSection={<IconDownload size={13} />}
+            onClick={exportCsv}
+            disabled={!audit.data?.entries.length}
+          >
+            导出本页 CSV
+          </Button>
           <TextInput
             size="xs"
             placeholder="操作者"
@@ -91,9 +139,27 @@ export function AuditPage() {
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <Text size="11px" className="mono" c="dimmed" truncate>
+                  <Text
+                    size="11px"
+                    className="mono"
+                    c={expanded.has(e.id) ? "steelblue" : "dimmed"}
+                    truncate
+                    style={{ cursor: e.detail && Object.keys(e.detail).length ? "pointer" : undefined }}
+                    onClick={() => toggleDetail(e.id)}
+                  >
                     {e.target || "—"}
+                    {e.detail && Object.keys(e.detail).length > 0 && (expanded.has(e.id) ? " 收起" : " 详情")}
                   </Text>
+                  {expanded.has(e.id) && e.detail && Object.keys(e.detail).length > 0 && (
+                    <Code
+                      block
+                      fz={10}
+                      mt={4}
+                      style={{ background: "var(--panel-2)", padding: 6, whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 220, overflow: "auto" }}
+                    >
+                      {JSON.stringify(e.detail, null, 2)}
+                    </Code>
+                  )}
                 </Table.Td>
                 <Table.Td>
                   <Text size="10.5px" c="dimmed" className="mono">
@@ -131,7 +197,7 @@ export function AuditPage() {
             total={Math.max(1, Math.ceil((audit.data?.total ?? 0) / limit))}
             value={page}
             onChange={setPage}
-            color="moss"
+            color="steelblue"
           />
         </Group>
       </Card>

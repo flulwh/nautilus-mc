@@ -35,6 +35,7 @@ import { AssistantPage } from "./pages/Assistant";
 import { AuditPage } from "./pages/Audit";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
+import { ProfilePage } from "./pages/Profile";
 import { ServerDetail } from "./pages/ServerDetail";
 import { SystemPage } from "./pages/System";
 import { UsersPage } from "./pages/Users";
@@ -76,7 +77,7 @@ export function App() {
   if (meQuery.isLoading) {
     return (
       <Group h="100vh" justify="center">
-        <Loader color="moss" />
+        <Loader color="steelblue" />
       </Group>
     );
   }
@@ -143,7 +144,7 @@ export function App() {
             <Menu width={200} position="bottom-end">
               <Menu.Target>
                 <Group gap={7} style={{ cursor: "pointer" }}>
-                  <Avatar size={24} radius={2} color="moss">
+                  <Avatar size={24} radius={2} color="steelblue">
                     {me.user.username.slice(0, 1).toUpperCase()}
                   </Avatar>
                   <Box visibleFrom="sm">
@@ -158,8 +159,11 @@ export function App() {
               </Menu.Target>
               <Menu.Dropdown>
                 <Menu.Label>{me.user.email}</Menu.Label>
-                <Menu.Item leftSection={<IconUserCircle size={15} />} disabled>
-                  个人设置（P6）
+                <Menu.Item
+                  leftSection={<IconUserCircle size={15} />}
+                  onClick={() => navigate("/profile")}
+                >
+                  个人设置
                 </Menu.Item>
                 <Menu.Divider />
                 <Menu.Item color="red" leftSection={<IconLogout size={15} />} onClick={logout}>
@@ -230,6 +234,7 @@ export function App() {
           <Route path="/servers" element={<Navigate to="/" replace />} />
           <Route path="/servers/:id" element={<ServerDetail />} />
           <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="/audit" element={canAudit ? <AuditPage /> : <Navigate to="/" replace />} />
           <Route path="/users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
           <Route path="/settings" element={isAdmin ? <SystemPage /> : <Navigate to="/" replace />} />

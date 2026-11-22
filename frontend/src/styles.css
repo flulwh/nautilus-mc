@@ -1,31 +1,33 @@
-:root {
-  --bg: #0f1216;
-  --panel: #15191e;
-  --panel-2: #1b2026;
-  --line: #262c33;
-  --line-strong: #39414a;
-  --text: #c7ced6;
-  --dim: #808a95;
-  --accent: #6f9a5e;
-  --accent-text: #9dba8c;
-  --ok: #5e9b5e;
-  --warn: #a8842c;
-  --bad: #b04a4a;
+/* Industrial console — light is the default surface. */
+:root,
+[data-mantine-color-scheme="light"] {
+  --bg: #eceff2;
+  --panel: #f8f9fa;
+  --panel-2: #eef1f4;
+  --line: #c9d0d6;
+  --line-strong: #9aa4ad;
+  --text: #1a2026;
+  --dim: #5d6872;
+  --accent: #2f567d;
+  --accent-text: #2f567d;
+  --ok: #2f6a54;
+  --warn: #8a6520;
+  --bad: #a23333;
 }
 
-[data-mantine-color-scheme="light"] {
-  --bg: #eceef0;
-  --panel: #ffffff;
-  --panel-2: #f2f4f6;
-  --line: #d8dce0;
-  --line-strong: #b9c0c7;
-  --text: #1e2328;
-  --dim: #6a737c;
-  --accent: #4f6b43;
-  --accent-text: #3f5637;
-  --ok: #3f7a3f;
-  --warn: #8a6a1f;
-  --bad: #9c3a3a;
+[data-mantine-color-scheme="dark"] {
+  --bg: #12161b;
+  --panel: #181d23;
+  --panel-2: #20262d;
+  --line: #2c343d;
+  --line-strong: #414b56;
+  --text: #d3dae1;
+  --dim: #8a949e;
+  --accent: #6f9ec4;
+  --accent-text: #9dc2dd;
+  --ok: #5e9b7e;
+  --warn: #a8842c;
+  --bad: #b04a4a;
 }
 
 * {

@@ -1,4 +1,4 @@
-import { Card, Grid, Group, Stack, Text } from "@mantine/core";
+import { Card, Grid, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -9,6 +9,7 @@ import { useSocket } from "../../useSocket";
 
 export function MetricsTab({ serverId }: { serverId: number }) {
   const [points, setPoints] = useState<MetricPoint[]>([]);
+  const [range, setRange] = useState("15");
 
   const history = useQuery<{ points: MetricPoint[] }>({
     queryKey: ["metrics", serverId],
@@ -34,20 +35,40 @@ export function MetricsTab({ serverId }: { serverId: number }) {
     }
   });
 
-  const ts = points.map((p) => p.ts);
-  const cpu = points.map((p) => p.cpu);
-  const mem = points.map((p) => p.rss_mb);
-  const players = points.map((p) => p.players);
+  // 时间范围只影响图表窗口，"当前值"始终取最新一个采样点。
+  const windowMinutes = Number(range);
+  const cutoff = Date.now() / 1000 - windowMinutes * 60;
+  const visible = points.filter((p) => p.ts >= cutoff);
+  const ts = visible.map((p) => p.ts);
+  const cpu = visible.map((p) => p.cpu);
+  const mem = visible.map((p) => p.rss_mb);
+  const players = visible.map((p) => p.players);
 
   const latest = points.length ? points[points.length - 1] : null;
 
   return (
     <Grid gutter="md">
       <Grid.Col span={12}>
+        <Group justify="space-between">
+          <Text fz={11} c="dimmed">查看窗口（点越多越细，取决于采样间隔）</Text>
+          <SegmentedControl
+            size="xs"
+            value={range}
+            onChange={setRange}
+            data={[
+              { value: "5", label: "5 分钟" },
+              { value: "15", label: "15 分钟" },
+              { value: "60", label: "1 小时" },
+              { value: "1440", label: "全部" },
+            ]}
+          />
+        </Group>
+      </Grid.Col>
+      <Grid.Col span={12}>
         <Card className="glass" p="md" withBorder>
           <Group justify="space-between" mb={4}>
             <Text className="stat-label">CPU 占用（进程树合计，可超过 100%）</Text>
-            <Text size="xs" c="moss.3" className="tabular">
+            <Text size="xs" c="steelblue.3" className="tabular">
               {latest && Number.isFinite(latest.cpu) ? `${latest.cpu.toFixed(1)}%` : "—"}
             </Text>
           </Group>

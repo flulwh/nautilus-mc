@@ -21,12 +21,15 @@ import {
   IconFolderPlus,
   IconPencil,
   IconRefresh,
+  IconSearch,
   IconTrash,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { ListEmpty, ListError, ListLoading } from "../../components/AsyncState";
+import { useConfirm } from "../../components/Confirm";
 import type { FileEntry } from "../../types";
 
 function human(bytes: number): string {
@@ -37,14 +40,24 @@ function human(bytes: number): string {
 
 export function FilesTab({ serverId }: { serverId: number }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [path, setPath] = useState("");
   const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
+  const [mkdirOpen, setMkdirOpen] = useState(false);
+  const [mkdirName, setMkdirName] = useState("");
+  const [renaming, setRenaming] = useState<FileEntry | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   const list = useQuery<{ path: string; entries: FileEntry[]; parent: string | null }>({
-    queryKey: ["files", serverId, path],
-    queryFn: () => api.get(`/servers/${serverId}/files?path=${encodeURIComponent(path)}`),
+    queryKey: ["files", serverId, path, showHidden],
+    queryFn: () =>
+      api.get(
+        `/servers/${serverId}/files?path=${encodeURIComponent(path)}&hidden=${showHidden ? "true" : "false"}`,
+      ),
   });
 
   useEffect(() => {
@@ -52,16 +65,24 @@ export function FilesTab({ serverId }: { serverId: number }) {
   }, [list.data]);
 
   const mkdir = useMutation({
-    mutationFn: async () => {
-      const name = window.prompt("目录名称");
-      if (!name) throw new Error("cancelled");
-      return api.post(`/servers/${serverId}/files/mkdir`, { path: path ? `${path}/${name}` : name });
+    mutationFn: (name: string) =>
+      api.post(`/servers/${serverId}/files/mkdir`, { path: path ? `${path}/${name}` : name }),
+    onSuccess: () => {
+      setMkdirOpen(false);
+      setMkdirName("");
+      qc.invalidateQueries({ queryKey: ["files", serverId] });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["files", serverId] }),
-    onError: (e) => {
-      if ((e as Error).message !== "cancelled")
-        notifications.show({ color: "red", title: "创建失败", message: (e as Error).message });
+    onError: (e) => notifications.show({ color: "red", title: "创建失败", message: (e as ApiError).detail ?? (e as Error).message }),
+  });
+
+  const rename = useMutation({
+    mutationFn: ({ entryPath, name }: { entryPath: string; name: string }) =>
+      api.post(`/servers/${serverId}/files/rename`, { path: entryPath, name }),
+    onSuccess: () => {
+      setRenaming(null);
+      qc.invalidateQueries({ queryKey: ["files", serverId] });
     },
+    onError: (e) => notifications.show({ color: "red", title: "重命名失败", message: (e as ApiError).detail ?? (e as Error).message }),
   });
 
   const remove = useMutation({
@@ -116,6 +137,9 @@ export function FilesTab({ serverId }: { serverId: number }) {
   };
 
   const crumbs = path ? path.split("/") : [];
+  const shown = (list.data?.entries ?? []).filter((e) =>
+    search ? e.name.toLowerCase().includes(search.toLowerCase()) : true,
+  );
 
   return (
     <Stack gap="sm">
@@ -129,7 +153,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
               <Anchor
                 key={`${c}-${i}`}
                 size="xs"
-                c={i === crumbs.length - 1 ? "moss.3" : "dimmed"}
+                c={i === crumbs.length - 1 ? "steelblue.5" : "dimmed"}
                 onClick={() => setPath(crumbs.slice(0, i + 1).join("/"))}
                 style={{ cursor: "pointer" }}
               >
@@ -144,10 +168,28 @@ export function FilesTab({ serverId }: { serverId: number }) {
           )}
         </Group>
         <Group gap={6}>
-          <Button size="xs" variant="light" color="gray" leftSection={<IconFolderPlus size={14} />} onClick={() => mkdir.mutate()}>
+          <TextInput
+            size="xs"
+            placeholder="筛选当前目录…"
+            leftSection={<IconSearch size={13} />}
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+            style={{ width: 170 }}
+          />
+          <Tooltip label={showHidden ? "隐藏文件：显示" : "隐藏文件：隐藏"}>
+            <ActionIcon
+              variant={showHidden ? "filled" : "subtle"}
+              color="gray"
+              size="sm"
+              onClick={() => setShowHidden((v) => !v)}
+            >
+              <IconFolder size={14} />
+            </ActionIcon>
+          </Tooltip>
+          <Button size="xs" variant="light" color="gray" leftSection={<IconFolderPlus size={14} />} onClick={() => setMkdirOpen(true)}>
             新建目录
           </Button>
-          <Button size="xs" variant="light" color="moss" leftSection={<IconArrowUp size={14} />} onClick={() => fileInput.current?.click()}>
+          <Button size="xs" variant="light" color="steelblue" leftSection={<IconArrowUp size={14} />} onClick={() => fileInput.current?.click()}>
             上传
           </Button>
           <ActionIcon variant="subtle" color="gray" onClick={() => qc.invalidateQueries({ queryKey: ["files", serverId] })}>
@@ -166,6 +208,13 @@ export function FilesTab({ serverId }: { serverId: number }) {
         </Group>
       </Group>
 
+      {list.isError ? (
+        <ListError error={list.error} onRetry={() => void list.refetch()} />
+      ) : list.isLoading ? (
+        <ListLoading label="读取目录…" />
+      ) : !shown.length ? (
+        <ListEmpty label={search ? "没有匹配的文件" : "目录为空"} hint={search ? "换个关键词试试" : undefined} />
+      ) : (
       <ScrollArea h="calc(100vh - 330px)" type="auto">
         <Table verticalSpacing={4} highlightOnHover>
           <Table.Thead>
@@ -173,11 +222,11 @@ export function FilesTab({ serverId }: { serverId: number }) {
               <Table.Th>名称</Table.Th>
               <Table.Th w={90}>大小</Table.Th>
               <Table.Th w={130}>修改时间</Table.Th>
-              <Table.Th w={80} />
+              <Table.Th w={140} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {list.data?.entries.map((entry) => (
+            {shown.map((entry) => (
               <Table.Tr key={entry.path} className="file-row" onClick={() => open(entry)}>
                 <Table.Td>
                   <Group gap={7} wrap="nowrap">
@@ -197,8 +246,21 @@ export function FilesTab({ serverId }: { serverId: number }) {
                     {new Date(entry.mtime * 1000).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                   </Text>
                 </Table.Td>
-                <Table.Td w={104}>
+                <Table.Td w={140}>
                   <Group gap={2} justify="flex-end" wrap="nowrap" onClick={(e) => e.stopPropagation()}>
+                    <Tooltip label="重命名">
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="gray"
+                        onClick={() => {
+                          setRenaming(entry);
+                          setRenameValue(entry.name);
+                        }}
+                      >
+                        <IconPencil size={13} />
+                      </ActionIcon>
+                    </Tooltip>
                     {!entry.is_dir && (
                       <>
                         <Tooltip label="编辑">
@@ -224,8 +286,10 @@ export function FilesTab({ serverId }: { serverId: number }) {
                         size="sm"
                         variant="subtle"
                         color="red"
-                        onClick={() => {
-                          if (window.confirm(`删除 ${entry.name}？`)) remove.mutate(entry.path);
+                        onClick={async () => {
+                          if (await confirm({ title: "删除文件", message: `删除 ${entry.name}？此操作不可恢复。`, danger: true })) {
+                            remove.mutate(entry.path);
+                          }
                         }}
                       >
                         <IconTrash size={13} />
@@ -235,18 +299,66 @@ export function FilesTab({ serverId }: { serverId: number }) {
                 </Table.Td>
               </Table.Tr>
             ))}
-            {list.isSuccess && !list.data?.entries.length && (
-              <Table.Tr>
-                <Table.Td colSpan={4}>
-                  <Text size="xs" c="dimmed" py="md" ta="center">
-                    目录为空
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
-            )}
           </Table.Tbody>
         </Table>
       </ScrollArea>
+      )}
+
+      <Modal opened={mkdirOpen} onClose={() => setMkdirOpen(false)} title="新建目录" size="xs">
+        <Stack gap="sm">
+          <TextInput
+            label="目录名"
+            data-autofocus
+            size="xs"
+            value={mkdirName}
+            onChange={(e) => setMkdirName(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && mkdirName.trim()) mkdir.mutate(mkdirName.trim());
+            }}
+          />
+          <Group justify="flex-end">
+            <Button size="compact-sm" variant="default" onClick={() => setMkdirOpen(false)}>
+              取消
+            </Button>
+            <Button size="compact-sm" loading={mkdir.isPending} disabled={!mkdirName.trim()} onClick={() => mkdir.mutate(mkdirName.trim())}>
+              创建
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal opened={!!renaming} onClose={() => setRenaming(null)} title="重命名" size="xs">
+        <Stack gap="sm">
+          <Text fz={10.5} c="dimmed" className="mono" truncate>
+            {renaming?.path}
+          </Text>
+          <TextInput
+            label="新名称"
+            data-autofocus
+            size="xs"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && renaming && renameValue.trim()) {
+                rename.mutate({ entryPath: renaming.path, name: renameValue.trim() });
+              }
+            }}
+          />
+          <Group justify="flex-end">
+            <Button size="compact-sm" variant="default" onClick={() => setRenaming(null)}>
+              取消
+            </Button>
+            <Button
+              size="compact-sm"
+              loading={rename.isPending}
+              disabled={!renameValue.trim() || renameValue === renaming?.name}
+              onClick={() => renaming && rename.mutate({ entryPath: renaming.path, name: renameValue.trim() })}
+            >
+              保存
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal opened={!!editing} onClose={() => setEditing(null)} title={<span className="mono">{editing?.path}</span>} size="xl">
         <Stack gap="sm">
@@ -260,7 +372,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
             <Button variant="subtle" color="gray" onClick={() => setEditing(null)}>
               取消
             </Button>
-            <Button color="moss" loading={saving} onClick={save}>
+            <Button color="steelblue" loading={saving} onClick={save}>
               保存
             </Button>
           </Group>

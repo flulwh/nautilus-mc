@@ -388,3 +388,41 @@ SSE 用新增 `started` 事件解决「首字节前空白」的问题，而不�
 已经能回答「哪一步慢、哪个工具失败、参数是什么」。也没有把轨迹落库：它与会话消息同
 生命周期，重启即清，符合现有单 worker 的定位。前端没有把时间线塞进对话气泡逐条重建，
 而是点开 Modal 拉服务端权威轨迹，避免流式事件丢失/乱序导致展示与真实执行不一致。
+
+---
+
+## 13. 同类面板对照：功能查缺补漏与 UI 换肤（2026-11-22）
+
+用户要求「完善功能，去 GitHub 找同类项目，查缺补漏，UI 再换一套」。先对照同类面板，
+再把"后端已有能力但前端没入口"的断链接上，最后换主题。
+
+| 上游项目 | 值得借鉴的点 | 本项目落地（或取舍） |
+|---|---|---|
+| [`and3rn3t/minecraft`](https://github.com/and3rn3t/minecraft) | 备份保留策略 + 异地备份、版本兼容检查与引导升级、metrics 日志轮转与搜索 | 备份保留与异地存储超出单面板范围，保留接口由外部任务处理；版本列表/安装已具备，未加引导式升级向导 |
+| [`alex190291/MineCP`](https://github.com/alex190291/MineCP) | 可视化 server.properties 编辑器、Modrinth/CurseForge 安装、实时 WS 监控 | 配置编辑器已有结构化/源码双模式；插件市场已有 Modrinth/Hangar；监控补了时间窗口切换 |
+| [`Niki2k1/mcsm`](https://github.com/Niki2k1/mcsm) | 每台服务器独立多页（Overview/Config/Players/Backups/World/Map/Files…）、Modrinth 更新徽章、Monaco 编辑器 + YAML/JSON 校验、服务器列表内建预览 | 本项目用单页 + Tab 达到同样分区；补了插件「检查更新」与可更新徽章；编辑器保持 textarea + 后端原子写/语法校验，不引入 Monaco（体积与依赖不划算）；列表预览需要实时 ping，不在本轮范围 |
+| [`septi0/mc-server-webadmin`](https://github.com/septi0/mc-server-webadmin) | 响应式布局、OIDC 登录、世界/玩家选项完整 | 响应式已有（侧栏折叠、Grid 断点）；OIDC 需引入外部 IdP 配置，超出本地面板定位；世界与玩家选项已覆盖 |
+| [`Mallard-Dash/Aurora-cloud`](https://github.com/Mallard-Dash/Aurora-cloud) | 统一仪表盘 + AI 助手结合系统健康上下文 | AI 助手已能读面板信息（panel_info / server_status），不再加一套 AI；主题从暗色赛博改为工业亮色，见下 |
+
+**查缺补漏结果**（以"后端已有、前端缺入口"为准，优先补真正的断链）：
+
+1. **权限感知**（安全 + 体验）：后端 4 角色 13 动作、读写共用 `server:<action>`，但 9 个详情 Tab 原来
+   只传 `serverId`，低权限角色能看到一点了就 403 的按钮。现在由 `/auth/me` 展开权限驱动 Tab 可见性，
+   删除服务器单独看 `server:delete`，总览「新建」看 `server:create`。授权仍在服务端，前端只做视觉收敛。
+2. **个人设置**：后端 `POST /auth/password` 早就有，前端菜单里却写着「个人设置（P6）」禁用项；
+   现在落地为可改自己密码的页面，并展示角色与权限清单。
+3. **文件管理**：接上闲置的 `POST /files/rename` 与 `files?hidden=`；新建目录从 `window.prompt` 换成 Modal；
+   补当前目录搜索；列表统一空/加载/错误三态。
+4. **插件页**：接上闲置的 `GET /plugins/updates`（检查更新 + 可更新徽章）与 search 的 `limit/offset` 分页。
+5. **统一交互**：7 处 `window.confirm` 换成全局 ConfirmProvider（Promise 风格 Modal）；
+   抽出 `AsyncState`（ListLoading/ListError/ListEmpty），先用在总览修复"查询失败被当空列表"的问题。
+6. **可观测性补完**：把闲置的 `GET /system`、`GET /meta` 做成系统信息卡片；
+   审计表格展开 `detail` 并导出当前页 CSV；监控加 5/15/60 分钟与全部的时间窗口。
+
+**UI 换肤取舍**：从 `moss` 灰绿暗色终端风换成 `steelblue` 工程蓝**亮色工业控制台**——浅灰底、
+深墨字、单一强调色、方角、1px 边框、无阴影渐变。只改主题色板与 CSS 变量，不换组件库：
+Mantine 8 的组件行为、权限与 SSE 协议都不受影响，回归风险最小。终端与代码编辑器保留深色，
+因为它们是内容面板而非界面 chrome，亮色反而刺眼。暗色仍可手动切换，两套 CSS 变量都维护。
+
+**未做**：没有引入 LangGraph 之类替换 agent；没有接 OIDC、Monaco、异地备份、实时服务器列表预览
+（前两者需外部基础设施，后两者超出"面板自身功能"的范围）；没有做国际化与全局命令面板（优先级靠后）。

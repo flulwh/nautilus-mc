@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { useConfirm } from "../../components/Confirm";
 
 interface World {
   name: string;
@@ -49,6 +50,7 @@ const mb = (bytes: number) => (bytes >= 1073741824 ? `${(bytes / 1073741824).toF
 
 export function WorldsTab({ serverId }: { serverId: number }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const key = ["worlds", String(serverId)];
   const [values, setValues] = useState<Record<string, string | number | boolean>>({});
   const [draft, setDraft] = useState({ name: "", seed: "", level_type: "minecraft:normal" });
@@ -112,7 +114,7 @@ export function WorldsTab({ serverId }: { serverId: number }) {
           <Text fz={12}>{meta.label}</Text>
           <Switch
             size="xs"
-            color="moss"
+            color="steelblue"
             checked={Boolean(value)}
             disabled={running}
             onChange={(e) => setValues((v) => ({ ...v, [name]: e.currentTarget.checked }))}
@@ -231,8 +233,8 @@ export function WorldsTab({ serverId }: { serverId: number }) {
                           color="red"
                           disabled={running}
                           leftSection={<IconTrash size={11} />}
-                          onClick={() => {
-                            if (!window.confirm(`把世界 ${w.name} 移到 .nautilus/world-trash/？`)) return;
+                          onClick={async () => {
+                            if (!(await confirm({ title: "删除世界", message: `把世界 ${w.name} 移到 .nautilus/world-trash/？`, danger: true }))) return;
                             remove.mutate(w.name);
                           }}
                         >
@@ -312,7 +314,7 @@ export function WorldsTab({ serverId }: { serverId: number }) {
               .map(([name, meta]) => renderField(name, meta))}
           </Stack>
           <Group justify="flex-end" mt="md">
-            <Button size="xs" color="moss" loading={save.isPending} disabled={running} onClick={() => save.mutate()}>
+            <Button size="xs" color="steelblue" loading={save.isPending} disabled={running} onClick={() => save.mutate()}>
               保存
             </Button>
           </Group>

@@ -53,7 +53,7 @@ const WorldsTab = lazy(() => import("./tabs/WorldsTab").then((m) => ({ default: 
 function TabFallback() {
   return (
     <Group justify="center" py="xl">
-      <Loader size="sm" color="moss" />
+      <Loader size="sm" color="steelblue" />
     </Group>
   );
 }
@@ -68,6 +68,18 @@ export function ServerDetail() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.get<Me>("/auth/me"), staleTime: 60_000 });
   const perms = me.data?.permissions ?? [];
   const can = (action: string) => hasPerm(perms, "server", action);
+  // 后端读写共用 server:<action>，所以这里按 Tab 对应的 action 决定整块可见性。
+  const tabs = {
+    console: can("console"),
+    players: can("players") || can("control"),
+    files: can("files"),
+    config: can("config"),
+    plugins: can("plugins"),
+    worlds: can("config"),
+    backups: can("backup") || can("config"),
+    tasks: can("tasks") || can("config"),
+    settings: can("config"),
+  };
 
   const server = useQuery<Server>({
     queryKey: ["server", String(serverId)],
@@ -96,10 +108,10 @@ export function ServerDetail() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["server", String(serverId)] }),
   });
 
-  if (server.isLoading) {
+  if (server.isLoading || me.isLoading) {
     return (
       <Group justify="center" py="xl">
-        <Loader color="moss" />
+        <Loader color="steelblue" />
       </Group>
     );
   }
@@ -112,6 +124,13 @@ export function ServerDetail() {
   }
 
   const s = server.data;
+  // 默认选中控制台；viewer 没有 console 权限时回退到所有人可见的监控页。
+  const effectiveTab =
+    tab === "console" && !tabs.console
+      ? "metrics"
+      : tabs[tab as keyof typeof tabs] === false
+        ? "metrics"
+        : tab;
   const state = live.state ?? s.runtime.state;
   const players = live.players ?? s.runtime.players;
   const running = state === "running" || state === "starting";
@@ -212,90 +231,126 @@ export function ServerDetail() {
         </Group>
       </Card>
 
-      <Tabs value={tab} onChange={setTab} variant="default" color="moss">
+      <Tabs value={effectiveTab} onChange={setTab} variant="default" color="steelblue">
         <Tabs.List className="server-tabs">
-          <Tabs.Tab value="console" leftSection={<IconTerminal2 size={14} />}>
-            控制台
-          </Tabs.Tab>
-          <Tabs.Tab value="players" leftSection={<IconUsers size={14} />}>
-            玩家
-          </Tabs.Tab>
-          <Tabs.Tab value="files" leftSection={<IconFolder size={14} />}>
-            文件
-          </Tabs.Tab>
-          <Tabs.Tab value="config" leftSection={<IconDeviceFloppy size={14} />}>
-            配置
-          </Tabs.Tab>
-          <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={14} />}>
-            插件
-          </Tabs.Tab>
-          <Tabs.Tab value="worlds" leftSection={<IconWorld size={14} />}>
-            世界
-          </Tabs.Tab>
-          <Tabs.Tab value="backups" leftSection={<IconArchive size={14} />}>
-            备份
-          </Tabs.Tab>
-          <Tabs.Tab value="tasks" leftSection={<IconCalendarTime size={14} />}>
-            任务
-          </Tabs.Tab>
+          {tabs.console && (
+            <Tabs.Tab value="console" leftSection={<IconTerminal2 size={14} />}>
+              控制台
+            </Tabs.Tab>
+          )}
+          {tabs.players && (
+            <Tabs.Tab value="players" leftSection={<IconUsers size={14} />}>
+              玩家
+            </Tabs.Tab>
+          )}
+          {tabs.files && (
+            <Tabs.Tab value="files" leftSection={<IconFolder size={14} />}>
+              文件
+            </Tabs.Tab>
+          )}
+          {tabs.config && (
+            <Tabs.Tab value="config" leftSection={<IconDeviceFloppy size={14} />}>
+              配置
+            </Tabs.Tab>
+          )}
+          {tabs.plugins && (
+            <Tabs.Tab value="plugins" leftSection={<IconPuzzle size={14} />}>
+              插件
+            </Tabs.Tab>
+          )}
+          {tabs.worlds && (
+            <Tabs.Tab value="worlds" leftSection={<IconWorld size={14} />}>
+              世界
+            </Tabs.Tab>
+          )}
+          {tabs.backups && (
+            <Tabs.Tab value="backups" leftSection={<IconArchive size={14} />}>
+              备份
+            </Tabs.Tab>
+          )}
+          {tabs.tasks && (
+            <Tabs.Tab value="tasks" leftSection={<IconCalendarTime size={14} />}>
+              任务
+            </Tabs.Tab>
+          )}
           <Tabs.Tab value="metrics" leftSection={<IconChartAreaLine size={14} />}>
             监控
           </Tabs.Tab>
-          <Tabs.Tab value="settings" leftSection={<IconSettings size={14} />}>
-            设置
-          </Tabs.Tab>
+          {tabs.settings && (
+            <Tabs.Tab value="settings" leftSection={<IconSettings size={14} />}>
+              设置
+            </Tabs.Tab>
+          )}
         </Tabs.List>
 
-        <Tabs.Panel value="console" pt="sm">
-          <Suspense fallback={<TabFallback />}>
-            <ConsoleTab serverId={serverId} canSend={can("console")} />
-          </Suspense>
-        </Tabs.Panel>
-        <Tabs.Panel value="players" pt="md">
-          <Suspense fallback={<TabFallback />}>
-            <PlayersTab serverId={serverId} />
-          </Suspense>
-        </Tabs.Panel>
-        <Tabs.Panel value="files" pt="md">
-          <Suspense fallback={<TabFallback />}>
+        {tabs.console && (
+          <Tabs.Panel value="console" pt="sm">
+            <Suspense fallback={<TabFallback />}>
+              <ConsoleTab serverId={serverId} canSend={can("console")} />
+            </Suspense>
+          </Tabs.Panel>
+        )}
+        {tabs.players && (
+          <Tabs.Panel value="players" pt="md">
+            <Suspense fallback={<TabFallback />}>
+              <PlayersTab serverId={serverId} />
+            </Suspense>
+          </Tabs.Panel>
+        )}
+        {tabs.files && (
+          <Tabs.Panel value="files" pt="md">
+            <Suspense fallback={<TabFallback />}>
               <FilesTab serverId={serverId} />
-          </Suspense>
-        </Tabs.Panel>
-        <Tabs.Panel value="config" pt="md">
-          <Suspense fallback={<TabFallback />}>
+            </Suspense>
+          </Tabs.Panel>
+        )}
+        {tabs.config && (
+          <Tabs.Panel value="config" pt="md">
+            <Suspense fallback={<TabFallback />}>
               <ConfigTab serverId={serverId} />
-          </Suspense>
-        </Tabs.Panel>
-        <Tabs.Panel value="plugins" pt="md">
-          <Suspense fallback={<TabFallback />}>
+            </Suspense>
+          </Tabs.Panel>
+        )}
+        {tabs.plugins && (
+          <Tabs.Panel value="plugins" pt="md">
+            <Suspense fallback={<TabFallback />}>
               <PluginsTab serverId={serverId} />
-          </Suspense>
-        </Tabs.Panel>
-        <Tabs.Panel value="worlds" pt="md">
-          <Suspense fallback={<TabFallback />}>
-            <WorldsTab serverId={serverId} />
-          </Suspense>
-        </Tabs.Panel>
-        <Tabs.Panel value="backups" pt="md">
-          <Suspense fallback={<TabFallback />}>
-            <BackupsTab serverId={serverId} />
-          </Suspense>
-        </Tabs.Panel>
-        <Tabs.Panel value="tasks" pt="md">
-          <Suspense fallback={<TabFallback />}>
-            <TasksTab serverId={serverId} />
-          </Suspense>
-        </Tabs.Panel>
+            </Suspense>
+          </Tabs.Panel>
+        )}
+        {tabs.worlds && (
+          <Tabs.Panel value="worlds" pt="md">
+            <Suspense fallback={<TabFallback />}>
+              <WorldsTab serverId={serverId} />
+            </Suspense>
+          </Tabs.Panel>
+        )}
+        {tabs.backups && (
+          <Tabs.Panel value="backups" pt="md">
+            <Suspense fallback={<TabFallback />}>
+              <BackupsTab serverId={serverId} />
+            </Suspense>
+          </Tabs.Panel>
+        )}
+        {tabs.tasks && (
+          <Tabs.Panel value="tasks" pt="md">
+            <Suspense fallback={<TabFallback />}>
+              <TasksTab serverId={serverId} />
+            </Suspense>
+          </Tabs.Panel>
+        )}
         <Tabs.Panel value="metrics" pt="md">
           <Suspense fallback={<TabFallback />}>
-              <MetricsTab serverId={serverId} />
+            <MetricsTab serverId={serverId} />
           </Suspense>
         </Tabs.Panel>
-        <Tabs.Panel value="settings" pt="md">
-          <Suspense fallback={<TabFallback />}>
-              <SettingsTab server={s} onChanged={() => server.refetch()} />
-          </Suspense>
-        </Tabs.Panel>
+        {tabs.settings && (
+          <Tabs.Panel value="settings" pt="md">
+            <Suspense fallback={<TabFallback />}>
+              <SettingsTab server={s} onChanged={() => server.refetch()} canDelete={can("delete")} />
+            </Suspense>
+          </Tabs.Panel>
+        )}
       </Tabs>
     </Stack>
   );

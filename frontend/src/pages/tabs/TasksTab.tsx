@@ -28,6 +28,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { useConfirm } from "../../components/Confirm";
 import type { ScheduledTask, TaskList } from "../../types";
 
 const KIND_META: Record<string, { label: string; color: string }> = {
@@ -35,7 +36,7 @@ const KIND_META: Record<string, { label: string; color: string }> = {
   start: { label: "启动", color: "teal" },
   stop: { label: "停止", color: "gray" },
   kill: { label: "强杀", color: "red" },
-  backup: { label: "备份", color: "moss" },
+  backup: { label: "备份", color: "steelblue" },
   command: { label: "指令", color: "blue" },
 };
 
@@ -66,6 +67,7 @@ function fmt(iso: string | null): string {
 
 export function TasksTab({ serverId }: { serverId: number }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [draft, setDraft] = useState<Draft | null>(null);
 
   const list = useQuery<TaskList>({
@@ -143,7 +145,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
             <Group gap={8}>
               <IconCalendarTime size={16} color="#5d8496" />
               <Title order={4}>定时任务</Title>
-              <Badge size="sm" variant="light" color="moss">
+              <Badge size="sm" variant="light" color="steelblue">
                 {tasks.length}
               </Badge>
             </Group>
@@ -152,7 +154,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
               <span className="mono">{list.data?.timezone ?? "面板默认"}</span> 解释。
             </Text>
           </Stack>
-          <Button color="moss" leftSection={<IconPlus size={15} />} onClick={() => setDraft({ ...EMPTY })}>
+          <Button color="steelblue" leftSection={<IconPlus size={15} />} onClick={() => setDraft({ ...EMPTY })}>
             新建任务
           </Button>
         </Group>
@@ -224,7 +226,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
                       <Table.Td>
                         <Switch
                           size="sm"
-                          color="moss"
+                          color="steelblue"
                           checked={task.enabled}
                           onChange={() => toggle.mutate(task)}
                         />
@@ -258,8 +260,10 @@ export function TasksTab({ serverId }: { serverId: number }) {
                             <ActionIcon
                               variant="subtle"
                               color="red"
-                              onClick={() => {
-                                if (window.confirm(`删除任务「${task.name}」？`)) remove.mutate(task);
+                              onClick={async () => {
+                                if (await confirm({ title: "删除任务", message: `删除任务「${task.name}」？`, danger: true })) {
+                                  remove.mutate(task);
+                                }
                               }}
                             >
                               <IconTrash size={15} />
@@ -348,7 +352,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
                     key={preset.cron}
                     size="compact-xs"
                     variant={draft.cron === preset.cron ? "light" : "subtle"}
-                    color="moss"
+                    color="steelblue"
                     onClick={() => setDraft({ ...draft, cron: preset.cron })}
                   >
                     {preset.label}
@@ -362,7 +366,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
               <Switch
                 checked={draft.enabled}
                 onChange={(e) => setDraft({ ...draft, enabled: e.currentTarget.checked })}
-                color="moss"
+                color="steelblue"
               />
             </Group>
 
@@ -370,7 +374,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
               <Button variant="subtle" color="gray" onClick={() => setDraft(null)}>
                 取消
               </Button>
-              <Button color="moss" loading={save.isPending} disabled={!draftValid} onClick={() => save.mutate(draft)}>
+              <Button color="steelblue" loading={save.isPending} disabled={!draftValid} onClick={() => save.mutate(draft)}>
                 {draft.id ? "保存" : "创建"}
               </Button>
             </Group>

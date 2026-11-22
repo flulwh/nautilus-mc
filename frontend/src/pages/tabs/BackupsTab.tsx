@@ -29,6 +29,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { useConfirm } from "../../components/Confirm";
 import type { BackupArchive, BackupList } from "../../types";
 import { useSocket } from "../../useSocket";
 
@@ -57,6 +58,7 @@ function when(ts: number): string {
 
 export function BackupsTab({ serverId }: { serverId: number }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [scope, setScope] = useState("world");
   const [label, setLabel] = useState("");
   const [restoring, setRestoring] = useState<BackupArchive | null>(null);
@@ -131,7 +133,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
               disabled={busy}
             />
             <Button
-              color="moss"
+              color="steelblue"
               leftSection={<IconArchive size={15} />}
               loading={busy}
               onClick={() => create.mutate()}
@@ -160,7 +162,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
               value={progress && progress.pct >= 0 ? progress.pct : 100}
               animated={!progress || progress.pct < 0}
               striped
-              color="moss"
+              color="steelblue"
               size="sm"
             />
             <Text size="10.5px" c="dimmed" className="mono">
@@ -207,7 +209,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Badge size="sm" variant="light" color={a.scope === "full" ? "orange" : "moss"}>
+                      <Badge size="sm" variant="light" color={a.scope === "full" ? "orange" : "steelblue"}>
                         {SCOPE_LABEL[a.scope] ?? a.scope}
                       </Badge>
                     </Table.Td>
@@ -249,8 +251,10 @@ export function BackupsTab({ serverId }: { serverId: number }) {
                           <ActionIcon
                             variant="subtle"
                             color="red"
-                            onClick={() => {
-                              if (window.confirm(`删除备份 ${a.name}？`)) remove.mutate(a.name);
+                            onClick={async () => {
+                              if (await confirm({ title: "删除备份", message: `删除备份 ${a.name}？此操作不可恢复。`, danger: true })) {
+                                remove.mutate(a.name);
+                              }
                             }}
                           >
                             <IconTrash size={15} />

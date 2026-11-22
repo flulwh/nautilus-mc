@@ -84,6 +84,14 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 - React 19 + Vite 7 + Mantine 8；控制台用 xterm.js，曲线用 uPlot（canvas，万点不掉帧）。
 - 每个 Tab **按需分包**（`React.lazy`），首屏只加载登录页与总览；xterm 290KB、uPlot 56KB 打开才下载。
 - WebSocket 复用登录 Cookie，不把 token 放进 query string（避免进 access log）。
+- **工业控制台主题**：默认亮色（浅灰底、深墨字、单一工程蓝强调色、方角 1px 边框、无阴影渐变），可切暗色；
+  终端与代码编辑器始终是独立的深色面板。
+- **权限感知**：服务器详情的 Tab 按当前角色的 Casbin 权限显示，低权限角色看不到点了就 403 的按钮；
+  删除服务器等敏感操作单独判断。总览的「新建」也按 `server:create` 隐藏。
+- **个人设置**：菜单里可改自己的密码（校验当前密码），页面同时列出当前账号的角色与展开后的权限清单。
+- **统一的交互**：所有删除确认走同一套 Modal（不再混用浏览器原生弹窗）；列表页统一空/加载/错误三态；
+  文件管理支持重命名、搜索、隐藏文件开关，插件支持检查更新与搜索分页，审计支持展开详情与导出 CSV，
+  监控支持时间窗口切换，系统设置展示运行时信息。
 
 ### 3. 认证与权限
 - [`fastapi-users`](https://github.com/fastapi-users/fastapi-users) 负责用户模型、Argon2 哈希、JWT 策略与 Cookie 传输；
@@ -448,7 +456,7 @@ my_ext = "my_ext.plugin"
 ## 测试
 
 ```bash
-pytest -q                     # 48 项：认证、RBAC、生命周期、WS 契约、备份/恢复、玩家文件、cron
+pytest -q                     # 133 项：认证、RBAC、生命周期、WS 契约、备份/恢复、玩家文件、cron、AI 助手与运行轨迹
 python scripts/e2e_vanilla.py # 真机 E2E：下载 1.20.4 → 启动 → RCON list → 采样 → 优雅停止
 ```
 

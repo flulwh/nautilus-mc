@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../api";
+import { ListError } from "../components/AsyncState";
 import { ServerTable } from "../components/ServerTable";
 import { hasPerm } from "../perm";
 import type { Server } from "../types";
@@ -51,6 +52,7 @@ export function Dashboard() {
     staleTime: 60_000,
   });
   const canControl = !!me.data && hasPerm(me.data.permissions, "server", "control");
+  const canCreate = !!me.data && hasPerm(me.data.permissions, "server", "create");
 
   const servers = useQuery<Server[]>({
     queryKey: ["servers"],
@@ -131,9 +133,11 @@ export function Dashboard() {
             {stats.total} 个，{stats.running} 个运行中 · 每 4s 刷新
           </Text>
         </Group>
-        <Button size="xs" leftSection={<IconPlus size={13} />} onClick={() => setOpened(true)}>
-          新建
-        </Button>
+        {canCreate && (
+          <Button size="xs" leftSection={<IconPlus size={13} />} onClick={() => setOpened(true)}>
+            新建
+          </Button>
+        )}
       </Group>
 
       <div className="stat-strip">
@@ -158,7 +162,9 @@ export function Dashboard() {
         </div>
       </div>
 
-      {servers.isLoading ? (
+      {servers.isError ? (
+        <ListError error={servers.error} onRetry={() => void servers.refetch()} />
+      ) : servers.isLoading ? (
         <Group justify="center" py="lg">
           <Loader size="xs" color="gray" />
         </Group>
@@ -176,9 +182,11 @@ export function Dashboard() {
           <Text fz={12} c="dimmed" mt={6} maw={560}>
             Paper / Purpur / 原版 / Fabric 的 jar 由面板从官方源下载并按哈希校验；Forge 与基岩版需要手动上传。
           </Text>
-          <Button size="xs" mt={12} leftSection={<IconPlus size={13} />} onClick={() => setOpened(true)}>
-            新建服务器
-          </Button>
+          {canCreate && (
+            <Button size="xs" mt={12} leftSection={<IconPlus size={13} />} onClick={() => setOpened(true)}>
+              新建服务器
+            </Button>
+          )}
         </Box>
       )}
 

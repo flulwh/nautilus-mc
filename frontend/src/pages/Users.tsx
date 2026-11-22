@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, ApiError } from "../api";
+import { useConfirm } from "../components/Confirm";
 import type { Me, UserRow } from "../types";
 
 const ROLE_HINT: Record<string, string> = {
@@ -30,6 +31,7 @@ const ROLE_HINT: Record<string, string> = {
 
 export function UsersPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [opened, setOpened] = useState(false);
   const [form, setForm] = useState({ username: "", email: "", password: "", role: "viewer" });
 
@@ -159,8 +161,10 @@ export function UsersPage() {
                       variant="subtle"
                       color="red"
                       disabled={self}
-                      onClick={() => {
-                        if (window.confirm(`删除用户 ${u.username}？`)) remove.mutate(u.id);
+                      onClick={async () => {
+                        if (await confirm({ title: "删除用户", message: `删除用户 ${u.username}？`, danger: true })) {
+                          remove.mutate(u.id);
+                        }
                       }}
                     >
                       <IconTrash size={13} />
@@ -181,7 +185,7 @@ export function UsersPage() {
         <Stack gap={4}>
           {Object.entries(ROLE_HINT).map(([role, hint]) => (
             <Group key={role} gap={10}>
-              <Badge size="xs" variant="light" color="moss" w={92}>
+              <Badge size="xs" variant="light" color="steelblue" w={92}>
                 {role}
               </Badge>
               <Text size="11px" c="dimmed">
@@ -226,7 +230,7 @@ export function UsersPage() {
               取消
             </Button>
             <Button
-              color="moss"
+              color="steelblue"
               loading={create.isPending}
               disabled={!form.username || !form.email || form.password.length < 10}
               onClick={() => create.mutate()}

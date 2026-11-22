@@ -164,7 +164,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
                     background: selected === f ? "rgba(53,198,225,0.12)" : "transparent",
                   }}
                 >
-                  <Text size="11.5px" className="mono" c={selected === f ? "moss.2" : "dimmed"} truncate>
+                  <Text size="11.5px" className="mono" c={selected === f ? "steelblue.2" : "dimmed"} truncate>
                     {f}
                   </Text>
                 </Box>
@@ -212,7 +212,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
         <Card className="glass" p="md" withBorder>
           {doc.isLoading ? (
             <Group justify="center" py="xl">
-              <Loader size="sm" color="moss" />
+              <Loader size="sm" color="steelblue" />
             </Group>
           ) : (
             <Stack gap="sm">
@@ -222,7 +222,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
                     {selected || "选择文件"}
                   </Text>
                   {doc.data && (
-                    <Badge size="xs" variant="light" color="moss">
+                    <Badge size="xs" variant="light" color="steelblue">
                       {FORMAT_LABEL[doc.data.format] ?? doc.data.format}
                     </Badge>
                   )}
@@ -243,7 +243,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
                   </Button>
                   <Button
                     size="xs"
-                    color="moss"
+                    color="steelblue"
                     leftSection={<IconDeviceFloppy size={14} />}
                     loading={saveForm.isPending || saveRaw.isPending}
                     onClick={() => (mode === "form" && supportsForm ? saveForm.mutate() : saveRaw.mutate())}
