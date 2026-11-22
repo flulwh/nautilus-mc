@@ -3,7 +3,7 @@
 > 面向「接手这个项目继续干」的人。读完这一份，你应该能跑起来、看懂它、知道哪些坑踩过了、
 > 以及下一刀该切在哪里。
 >
-> 文档时间：2026-11-22 · 代码状态：`main` @ `94d9767` + 未提交的动效改动
+> 文档时间：2026-11-22 · 代码状态：`main` @ `dafa5e4`（已推送，工作区干净）
 > 仓库：https://github.com/flulwh/nautilus-mc （public，MIT，唯一贡献者 flulwh）
 
 ---
@@ -163,6 +163,7 @@ Tab 级 lazy 分包，`motion` 单独拆 chunk（主包 443KB → 309KB）。
 | `c562604` | 推理过程可视化与发送即时反馈 |
 | `4b721a3` | Agent 运行轨迹与前端可观测性 |
 | `94d9767` | 工业控制台亮色主题 + 功能查缺补漏 |
+| `dafa5e4` | 工业仪表动效系统 + 交接文档 |
 
 ### 4.2 验证基线（2026-11-22 实测）
 
@@ -175,9 +176,14 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
                           执行轨迹 Modal 全部正常（Edge + 内置浏览器）
 ```
 
-### 4.3 未提交的改动（动效这一轮）
+**一处容易误判的行为**：`执行轨迹` 按钮在当前会话还没有任何消息时是 `disabled`
+（`activeId` 为空）。这不是 bug —— 发一条消息后按钮立即可用，Modal 正常弹出并显示
+该次运行的逐步骤时间线（模型步 + 工具步，含服务端实测耗时、参数与结果）。
+若要优化，是加一句 tooltip 提示"先发一条消息"，而不是改按钮的启用条件。
 
-工作区有 20 个前端文件 + `nautilus/webui/dist/` 产物待提交，核心是：
+### 4.3 动效这一轮改了什么（已在 `dafa5e4`）
+
+20 个前端文件 + `nautilus/webui/dist/` 产物，核心是：
 
 - **新增** `frontend/src/motion.tsx`（150 行）—— 动效单一入口
 - **新增** `frontend/package.json` 依赖 `motion@12`
@@ -188,7 +194,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 - **改** `frontend/vite.config.ts` —— motion 拆独立 chunk
 - **改** `docs/research.md` —— 补第 14 节动效设计说明
 
-**下一步要做**：`git add -A && git commit && git push`。
+同时清理了临时验证脚本 `tools/stub_openai.py`（正式替代品是 `scripts/mock_llm.py`）。
 
 > Windows 上 push 可能报 `CRYPT_E_NO_REVOCATION_CHECK`，用
 > `git -c http.sslBackend=schannel -c http.schannelCheckRevoke=false push`
@@ -200,11 +206,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 
 ### 5.1 明确的待办
 
-1. **提交动效改动**（见 4.3）。
-2. **轨迹 Modal 的一个 UX 小坑**：`执行轨迹` 按钮在 `activeId` 为空时是 `disabled`，
-   也就是"还没发过消息"时按钮是灰的。首次使用的人可能不知道要先发一条消息。
-   建议加一个 tooltip 提示或改成"点击后提示先发消息"。
-3. **截图更新**：`docs/screenshots/` 里的图还是旧暗色主题拍的，换成亮色工程蓝后没重拍。
+1. **截图更新**：`docs/screenshots/` 里的图还是旧暗色主题拍的，换成亮色工程蓝后没重拍。
 
 ### 5.2 架构文档里已经列出的演进路线
 
