@@ -2,9 +2,11 @@ import { Alert, Button, Card, Code, Group, PasswordInput, Stack, Text, Title } f
 import { notifications } from "@mantine/notifications";
 import { IconCheck, IconKey, IconShieldCheck } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { useState } from "react";
 
 import { api, ApiError } from "../api";
+import { staggerContainer, staggerItem } from "../motion";
 import type { Me } from "../types";
 
 /** 个人设置：账号信息与修改自己的密码（后端 POST /auth/password 已就绪）。 */
@@ -48,12 +50,20 @@ export function ProfilePage() {
   const permissions = me.data?.permissions ?? [];
 
   return (
+    <motion.div
+      variants={staggerContainer(0.09)}
+      initial="hidden"
+      animate="show"
+    >
     <Stack gap="md" maw={720}>
-      <Group gap={8}>
-        <IconShieldCheck size={18} />
-        <Title order={3}>个人设置</Title>
-      </Group>
+      <motion.div variants={staggerItem}>
+        <Group gap={8}>
+          <IconShieldCheck size={18} />
+          <Title order={3}>个人设置</Title>
+        </Group>
+      </motion.div>
 
+      <motion.div variants={staggerItem}>
       <Card className="glass" p="md">
         <Title order={4} mb="sm">
           账号信息
@@ -84,7 +94,9 @@ export function ProfilePage() {
           </Stack>
         )}
       </Card>
+      </motion.div>
 
+      <motion.div variants={staggerItem}>
       <Card className="glass" p="md">
         <Group gap={8} mb="sm">
           <IconKey size={16} />
@@ -133,6 +145,8 @@ export function ProfilePage() {
           </Group>
         </Stack>
       </Card>
+      </motion.div>
     </Stack>
+    </motion.div>
   );
 }

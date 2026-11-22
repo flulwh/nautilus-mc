@@ -24,6 +24,9 @@ export function MetricChart({
   const { ref: sizeRef, width } = useElementSize();
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<uPlot | null>(null);
+  // Draw-in progress: the line grows from the left instead of appearing whole.
+  const growRef = useRef(0);
+  const growRaf = useRef(0);
 
   // Within a short window uPlot splits on seconds; dropping them collapsed
   // every label to the same "HH:MM".
@@ -40,6 +43,10 @@ export function MetricChart({
   // three canvases just to move one point.
   useEffect(() => {
     if (!hostRef.current || width < 80) return;
+    // Wrap the default linear path builder so the curve grows from the left
+    // instead of appearing whole.
+    const linearPaths = uPlot.paths.linear?.();
+
     const opts: uPlot.Options = {
       width,
       height,
@@ -52,7 +59,7 @@ export function MetricChart({
           stroke: "#6b747d",
           grid: { stroke: "#242a31", width: 1 },
           ticks: { stroke: "#242a31", width: 1 },
-          font: "10px Inter, sans-serif",
+          font: "10px ui-monospace, Cascadia Mono, Consolas, monospace",
           // uPlot's default HH:MM:SS labels need ~52px; with 28px they were
           // silently truncated to "-50".
           size: withSeconds ? 52 : 40,
@@ -68,7 +75,7 @@ export function MetricChart({
           stroke: "#6b747d",
           grid: { stroke: "#242a31", width: 1 },
           ticks: { stroke: "#242a31", width: 1 },
-          font: "10px Inter, sans-serif",
+          font: "10px ui-monospace, Cascadia Mono, Consolas, monospace",
           size: 40,
         },
       ],
@@ -80,13 +87,38 @@ export function MetricChart({
           width: 1.6,
           fill: `${s.color}18`,
           points: { show: false },
+          paths: linearPaths
+            ? (self: uPlot, seriesIdx: number, idx0: number, idx1: number) => {
+                const frac = growRef.current;
+                if (frac >= 1) return linearPaths(self, seriesIdx, idx0, idx1);
+                const spanIdx = idx1 - idx0;
+                const cut = Math.max(idx0, Math.round(idx0 + spanIdx * frac));
+                return linearPaths(self, seriesIdx, idx0, cut);
+              }
+            : undefined,
         })),
       ],
     };
 
     const chart = new uPlot(opts, data, hostRef.current);
     chartRef.current = chart;
+
+    // Grow the curves in once when the chart is (re)built.
+    growRef.current = 0;
+    const started = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - started) / 520);
+      // Ease-out cubic: fast start, gentle settle.
+      growRef.current = 1 - Math.pow(1 - t, 3);
+      chart.redraw(false, false);
+      if (t < 1) {
+        growRaf.current = requestAnimationFrame(tick);
+      }
+    };
+    growRaf.current = requestAnimationFrame(tick);
+
     return () => {
+      cancelAnimationFrame(growRaf.current);
       chart.destroy();
       chartRef.current = null;
     };

@@ -426,3 +426,60 @@ Mantine 8 的组件行为、权限与 SSE 协议都不受影响，回归风险�
 
 **未做**：没有引入 LangGraph 之类替换 agent；没有接 OIDC、Monaco、异地备份、实时服务器列表预览
 （前两者需外部基础设施，后两者超出"面板自身功能"的范围）；没有做国际化与全局命令面板（优先级靠后）。
+
+---
+
+## 14. 工业仪表动效系统（2026-11-22）
+
+用户要求「ui/ux 动画拉满」。但面板不是营销站：它 4 秒轮询一次服务器列表、长时间停留在
+监控页，动画如果"满"到会拖慢操作或干扰读数，就是负资产。所以这轮的目标不是加动画，
+而是**建立一套统一的动效语言**，让每一次状态变化都有"物理含义"。
+
+### 14.1 动效语言：`frontend/src/motion.tsx`
+
+单一入口导出三样东西，全站只用这三样，避免每页各写一套 timing：
+
+| 导出 | 语义 | 实现 |
+|---|---|---|
+| `EASE.snap` | 继电器吸合：干脆、无回弹 | `cubic-bezier(.2,.9,.25,1)` |
+| `EASE.measure` | 仪表回落：连续量 | `cubic-bezier(.4,0,.2,1)` |
+| `EASE.exit` | 退场比入场快 | `cubic-bezier(.4,0,1,1)` |
+| `pageVariants` | 页面级进出场 | 位移 8px + 淡入 |
+| `staggerContainer` / `staggerItem` | 面板上电式交错入场 | step 35ms |
+| `cardVariants` / `rowVariants` | 卡片 / 表格行落位 | scale 0.985 → 1 |
+| `popVariants` | Mantine 自绘弹层 | 缩放 + 上浮 |
+| `useCountUp` | 数字机械滚动 | `motion.animate` 补间 |
+| `useRevealOnScroll` | 长列表进入视口才动 | `useInView` |
+| `useMotionPref` | 全局减弱动效开关 | `useReducedMotion` |
+
+**关键约束**：所有动画只碰 `transform` / `opacity`，不碰 `width/height/top/left`。
+这条不是审美偏好而是硬约束 —— 页面同时在跑 4 秒轮询，任何触发布局的属性动画都会让
+滚动和点击掉帧。
+
+### 14.2 CSS 层的物理反馈（`frontend/src/styles.css`）
+
+JS 动画管"进场"，CSS 动画管"持续状态"：
+
+- **工程网格背景**：`repeating-linear-gradient` 画 24px 网格，作用在 `.shell-main`，
+  不放 `body`（登录页是全屏留白，铺网格会变成噪点）。
+- **状态灯呼吸**：`.stage-led` 用 `box-shadow` 脉冲，AI 助手运行中那颗灯在"呼吸"。
+- **骨架屏 shimmer**：背景位移而非整块闪烁，避免频闪。
+- **扫描线**：轨迹时间线上的 `.trace-running` 有一条横扫的高光，表示"正在跑"。
+- **导航指示条**：侧栏当前项左侧 2px 强调条，切换时用 `layoutId` 平移。
+- **按键反馈**：`.btn-press` 提供按下的物理压感（Mantine `ActionIcon` 不接受 `whileTap`，
+  所以走 CSS 而非 motion 组件）。
+
+### 14.3 降级路径
+
+`prefers-reduced-motion: reduce` 时：`MotionProvider` 把 `reduced` 广播下去，
+`useCountUp` 直接跳到目标值，`useRevealOnScroll` 直接显示，
+CSS 侧统一 `animation: none` + `transition: none`。
+系统开启"减弱动态效果"的用户看到的是完全静态的界面，功能一个不少。
+
+### 14.4 打包体积
+
+`motion` 拆成独立 chunk（`vite.config.ts` 的 `manualChunks`），主包从 443KB 降到 309KB，
+motion 独立 133KB（gzip 44KB）。不拆的话，登录页这一个静态页面也要下载整包动效库。
+
+**未做**：没有做视差滚动、粒子背景、Lottie、自定义光标 —— 那是展示型页面的语言，
+放在需要盯着看 30 秒的运维界面上只会分散注意力。

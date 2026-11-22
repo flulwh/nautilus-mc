@@ -199,7 +199,7 @@ export function SystemPage() {
   const eventOptions = (hooksQuery.data?.events ?? []).map((e) => ({ value: e, label: EVENT_LABELS[e] ?? e }));
 
   return (
-    <Grid gutter="md">
+    <Grid gutter="md" className="stagger-cols">
       <Grid.Col span={12}>
         <Card className="glass" p="md" withBorder>
           <Group justify="space-between" mb="sm">

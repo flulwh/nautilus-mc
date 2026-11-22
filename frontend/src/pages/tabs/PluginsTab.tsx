@@ -6,7 +6,6 @@ import {
   Card,
   Grid,
   Group,
-  Loader,
   Modal,
   ScrollArea,
   SegmentedControl,
@@ -23,6 +22,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { Skeleton } from "../../components/AsyncState";
 import { useConfirm } from "../../components/Confirm";
 import type { MarketItem, PluginItem } from "../../types";
 
@@ -252,9 +252,14 @@ export function PluginsTab({ serverId }: { serverId: number }) {
           </Group>
 
           {search.isLoading && (
-            <Group justify="center" py="xl">
-              <Loader size="sm" color="steelblue" />
-            </Group>
+            <Stack gap={0} py="sm" aria-busy="true">
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} style={{ padding: "9px 4px" }}>
+                  <Skeleton h={12} w={`${70 - i * 8}%`} />
+                  <Skeleton h={9} w="40%" />
+                </div>
+              ))}
+            </Stack>
           )}
           {search.isError && (
             <Text size="xs" c="red.4" py="md">
@@ -337,9 +342,13 @@ export function PluginsTab({ serverId }: { serverId: number }) {
 
       <Modal opened={!!picking} onClose={() => setPicking(null)} title={`安装 ${picking?.name ?? ""}`} size="lg">
         {versions.isLoading ? (
-          <Group justify="center" py="lg">
-            <Loader size="sm" color="steelblue" />
-          </Group>
+          <Stack gap={0} py="sm" aria-busy="true">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} style={{ padding: "8px 4px" }}>
+                <Skeleton h={12} w={`${60 + (i % 3) * 12}%`} />
+              </div>
+            ))}
+          </Stack>
         ) : (
           <Stack gap="xs">
             <Text size="xs" c="dimmed">

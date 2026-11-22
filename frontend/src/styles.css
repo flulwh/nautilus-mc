@@ -6,6 +6,7 @@
   --panel-2: #eef1f4;
   --line: #c9d0d6;
   --line-strong: #9aa4ad;
+  --grid-line: rgba(47, 86, 125, 0.055);
   --text: #1a2026;
   --dim: #5d6872;
   --accent: #2f567d;
@@ -21,6 +22,7 @@
   --panel-2: #20262d;
   --line: #2c343d;
   --line-strong: #414b56;
+  --grid-line: rgba(111, 158, 196, 0.05);
   --text: #d3dae1;
   --dim: #8a949e;
   --accent: #6f9ec4;
@@ -409,7 +411,7 @@ body {
   flex: 0 0 auto;
 }
 
-/* -------------------------------------------------------------- login page */
+/* ---------------------------------------------------------- login page */
 
 .login-shell {
   min-height: 100vh;
@@ -486,4 +488,628 @@ body {
 .spec-list dd {
   margin: 0;
   color: var(--text);
+}
+
+/* ==================================================================
+   Motion layer — "instrument panel" choreography.
+
+   Everything here is decorative feedback: the app still works with
+   every animation removed, and every rule here is disabled under
+   prefers-reduced-motion (see the block at the bottom).
+   ================================================================== */
+
+/* --- backdrop: a faint engineering grid so panels read as an
+       instrument face rather than a flat white sheet -------------
+       Scoped to the app shell: the login screen is its own surface
+       and should stay clean. */
+
+.shell-main {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+  position: relative;
+}
+
+/* --- focus: a hard square ring, consistent with the 2px radius --- */
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- press feedback: things sink, they do not bounce ------------- */
+
+:where(button, .mantine-ActionIcon-root, .nav-item, .srv-table tbody tr) {
+  transition:
+    background-color 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 120ms cubic-bezier(0.2, 0.9, 0.25, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+:where(button, .mantine-ActionIcon-root):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* --- nav: the active marker slides between items ------------------ */
+
+.nav-item {
+  position: relative;
+}
+
+.nav-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 60%;
+  background: var(--accent);
+  transform: translateY(-50%);
+  border-radius: 1px;
+}
+
+.nav-item .nav-icon {
+  display: inline-flex;
+  transition: transform 200ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.nav-item:hover .nav-icon {
+  transform: translateX(2px);
+}
+
+/* --- status dot: a live running server breathes ------------------- */
+
+.status-dot {
+  position: relative;
+}
+
+.status-dot.running::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 1px solid var(--ok);
+  opacity: 0;
+  animation: dot-halo 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.status-dot.starting::after,
+.status-dot.stopping::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 1px solid var(--warn);
+  opacity: 0;
+  animation: dot-halo 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes dot-halo {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.7);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+/* --- skeleton: a sweep, like a radar trace crossing the panel ----- */
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--line-strong) 26%, transparent),
+    transparent
+  );
+  animation: skeleton-sweep 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes skeleton-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-row {
+  height: 13px;
+  margin-bottom: 7px;
+}
+
+/* --- stat strip: the divider draws itself in ---------------------- */
+
+.stat-strip {
+  position: relative;
+  overflow: hidden;
+}
+
+/* A slow scan bar travelling across the strip: the panel is "polling". */
+.stat-strip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 90px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 9%, transparent), transparent);
+  animation: strip-scan 5.5s linear infinite;
+}
+
+@keyframes strip-scan {
+  0% {
+    transform: translateX(-120px);
+  }
+  60%,
+  100% {
+    transform: translateX(calc(100vw + 120px));
+  }
+}
+
+/* --- card hover: a 1px lift, the way a key cap moves -------------- */
+
+.card-lift {
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.9, 0.25, 1),
+    box-shadow 200ms cubic-bezier(0.2, 0.9, 0.25, 1),
+    border-color 200ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.card-lift:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+  box-shadow: 0 6px 18px -10px color-mix(in srgb, var(--text) 45%, transparent);
+}
+
+/* --- tabs: the active underline glides ---------------------------- */
+
+.server-tabs [role="tab"] {
+  position: relative;
+  transition: color 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.server-tabs [role="tab"][data-active] {
+  color: var(--text);
+}
+
+.server-tabs [role="tab"][data-active]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  animation: tab-underline 220ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+@keyframes tab-underline {
+  from {
+    transform: scaleX(0.2);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+/* --- table rows: the hover marker slides in from the left --------- */
+
+.srv-table tbody tr {
+  position: relative;
+}
+
+.srv-table tbody tr td:first-child {
+  position: relative;
+}
+
+.srv-table tbody tr td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  transform: scaleY(0);
+  transition: transform 180ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.srv-table tbody tr:hover td:first-child::before {
+  transform: scaleY(1);
+}
+
+/* --- assistant: a live "receiving" marker on the streaming bubble -- */
+
+.msg-enter {
+  animation: msg-in 320ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Tool call cards unfold from their top edge. */
+.tool-enter {
+  animation: tool-in 300ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes tool-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The trace timeline lights up step by step. */
+.trace-step {
+  animation: trace-in 280ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  animation-delay: var(--step-delay, 0ms);
+}
+
+@keyframes trace-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A vertical rail that draws itself down the timeline. */
+.trace-rail {
+  transform-origin: top;
+  animation: rail-grow 520ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes rail-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* While a tool is running, its row pulses. */
+.trace-running {
+  animation: trace-pulse 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes trace-pulse {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: color-mix(in srgb, var(--warn) 13%, transparent);
+  }
+}
+
+/* --- error shake: a relay that failed to latch -------------------- */
+
+.shake {
+  animation: shake 380ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-3px);
+  }
+  40%,
+  60% {
+    transform: translateX(3px);
+  }
+}
+
+/* --- login: the brand dot beats like a heartbeat ------------------ */
+
+.brand-dot {
+  animation: brand-beat 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes brand-beat {
+  0%,
+  86%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  92% {
+    transform: scale(1.25);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
+/* --- notification: Mantine slides them, we tint them ------------- */
+
+[data-mantine-notification] {
+  animation: notif-in 300ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes notif-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- console: new log lines fade up -------------------------------- */
+
+.log-line {
+  animation: log-in 200ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- buttons that carry a running action pulse -------------------- */
+
+.btn-busy {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-busy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, #fff 26%, transparent), transparent);
+  animation: busy-sweep 1.3s linear infinite;
+}
+
+@keyframes busy-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* --- page chrome: the shell border lights up on load -------------- */
+
+/* A one-shot flash along the top edge when a route changes. */
+.route-flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: route-flash 520ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes route-flash {
+  from {
+    opacity: 0.9;
+    transform: scaleX(0.3);
+  }
+  to {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+/* --- reduced motion: strip the choreography, keep the state -------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .status-dot.running::after,
+  .status-dot.starting::after,
+  .status-dot.stopping::after {
+    display: none;
+  }
+}
+
+/* --- staggered table rows (Mantine renders plain <tr>, so this is CSS) -- */
+
+.stagger-rows tbody tr {
+  animation: row-in 320ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.stagger-rows tbody tr:nth-child(1) { animation-delay: 0ms; }
+.stagger-rows tbody tr:nth-child(2) { animation-delay: 35ms; }
+.stagger-rows tbody tr:nth-child(3) { animation-delay: 70ms; }
+.stagger-rows tbody tr:nth-child(4) { animation-delay: 105ms; }
+.stagger-rows tbody tr:nth-child(5) { animation-delay: 140ms; }
+.stagger-rows tbody tr:nth-child(6) { animation-delay: 175ms; }
+.stagger-rows tbody tr:nth-child(7) { animation-delay: 210ms; }
+.stagger-rows tbody tr:nth-child(8) { animation-delay: 245ms; }
+.stagger-rows tbody tr:nth-child(9) { animation-delay: 280ms; }
+.stagger-rows tbody tr:nth-child(n + 10) { animation-delay: 315ms; }
+
+/* Tables whose rows expand into a second detail row: animate the primary
+   row only, so the delay index does not drift. */
+.stagger-rows-alt tbody tr:nth-child(odd) {
+  animation: row-in 320ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.stagger-rows-alt tbody tr:nth-child(odd):nth-child(1) { animation-delay: 0ms; }
+.stagger-rows-alt tbody tr:nth-child(odd):nth-child(3) { animation-delay: 35ms; }
+.stagger-rows-alt tbody tr:nth-child(odd):nth-child(5) { animation-delay: 70ms; }
+.stagger-rows-alt tbody tr:nth-child(odd):nth-child(7) { animation-delay: 105ms; }
+.stagger-rows-alt tbody tr:nth-child(odd):nth-child(9) { animation-delay: 140ms; }
+.stagger-rows-alt tbody tr:nth-child(odd):nth-child(11) { animation-delay: 175ms; }
+.stagger-rows-alt tbody tr:nth-child(odd):nth-child(n + 13) { animation-delay: 210ms; }
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- assistant: the "stage" indicator lamp in the header ----------- */
+
+.stage-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--accent);
+  animation: led-pulse 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
+/* The thinking block breathes while the model is still reasoning. */
+.thinking-block {
+  position: relative;
+  transition: border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.thinking-block::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  animation: thinking-rail 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes thinking-rail {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+    transform-origin: top;
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleY(1);
+    transform-origin: top;
+    opacity: 1;
+  }
+}
+
+/* The plan block keeps a soft left rule so it reads as a checklist. */
+.plan-block {
+  position: relative;
+}
+
+/* A button that visibly compresses when pressed. */
+.btn-press {
+  transition: transform 110ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.btn-press:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+/* --- grid columns power up one after another ------------------------ */
+
+.stagger-cols > * {
+  animation: col-in 380ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.stagger-cols > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-cols > *:nth-child(2) { animation-delay: 70ms; }
+.stagger-cols > *:nth-child(3) { animation-delay: 140ms; }
+.stagger-cols > *:nth-child(4) { animation-delay: 210ms; }
+.stagger-cols > *:nth-child(5) { animation-delay: 280ms; }
+.stagger-cols > *:nth-child(n + 6) { animation-delay: 350ms; }
+
+@keyframes col-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- assistant: conversation list items ---------------------------- */
+
+.conv-item {
+  border-radius: 2px;
+  transition:
+    background-color 140ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 160ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.conv-item:hover {
+  background: var(--panel-2) !important;
+  transform: translateX(2px);
 }

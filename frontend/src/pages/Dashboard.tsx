@@ -4,7 +4,6 @@ import {
   Code,
   Divider,
   Group,
-  Loader,
   Modal,
   NumberInput,
   Select,
@@ -16,11 +15,13 @@ import {
 import { notifications } from "@mantine/notifications";
 import { IconPlus } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../api";
-import { ListError } from "../components/AsyncState";
+import { ListError, SkeletonRows } from "../components/AsyncState";
 import { ServerTable } from "../components/ServerTable";
+import { useCountUp, staggerContainer, staggerItem } from "../motion";
 import { hasPerm } from "../perm";
 import type { Server } from "../types";
 
@@ -122,6 +123,13 @@ export function Dashboard() {
     };
   }, [servers.data]);
 
+  // The stat strip refreshes every 4s; rolling the digits makes the change
+  // legible instead of a silent swap.
+  const totalN = useCountUp(stats.total);
+  const runningN = useCountUp(stats.running);
+  const playersN = useCountUp(stats.players);
+  const memN = useCountUp(stats.mem);
+
   return (
     <Stack gap="sm">
       <Group justify="space-between" align="center">
@@ -140,34 +148,34 @@ export function Dashboard() {
         )}
       </Group>
 
-      <div className="stat-strip">
-        <div>
-          <div className="stat-label">服务器</div>
-          <div className="stat-value">{stats.total}</div>
-        </div>
-        <div>
-          <div className="stat-label">运行中</div>
-          <div className="stat-value">{stats.running}</div>
-        </div>
-        <div>
-          <div className="stat-label">在线玩家</div>
-          <div className="stat-value">{stats.players}</div>
-        </div>
-        <div>
-          <div className="stat-label">服务端内存</div>
-          <div className="stat-value">
-            {stats.mem.toFixed(0)}
-            <span style={{ fontSize: 11, color: "var(--dim)", marginLeft: 3 }}>MB</span>
-          </div>
-        </div>
-      </div>
+      <motion.div
+        className="stat-strip"
+        variants={staggerContainer(0.06)}
+        initial="hidden"
+        animate="show"
+      >
+        {[
+          { label: "服务器", value: totalN.toFixed(0), suffix: "" },
+          { label: "运行中", value: runningN.toFixed(0), suffix: "" },
+          { label: "在线玩家", value: playersN.toFixed(0), suffix: "" },
+          { label: "服务端内存", value: memN.toFixed(0), suffix: "MB" },
+        ].map((s) => (
+          <motion.div key={s.label} variants={staggerItem}>
+            <div className="stat-label">{s.label}</div>
+            <div className="stat-value">
+              {s.value}
+              {s.suffix && (
+                <span style={{ fontSize: 11, color: "var(--dim)", marginLeft: 3 }}>{s.suffix}</span>
+              )}
+            </div>
+          </motion.div>
+        ))}
+      </motion.div>
 
       {servers.isError ? (
         <ListError error={servers.error} onRetry={() => void servers.refetch()} />
       ) : servers.isLoading ? (
-        <Group justify="center" py="lg">
-          <Loader size="xs" color="gray" />
-        </Group>
+        <SkeletonRows rows={5} />
       ) : servers.data?.length ? (
         <ServerTable
           servers={servers.data}
@@ -177,7 +185,13 @@ export function Dashboard() {
           onStop={(s) => control.mutate({ id: s.id, action: "stop" })}
         />
       ) : (
-        <Box className="glass" p={20}>
+        <motion.div
+          className="glass"
+          style={{ padding: 20 }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.36, ease: [0.2, 0.9, 0.25, 1] }}
+        >
           <Text fz={12.5}>还没有服务器。</Text>
           <Text fz={12} c="dimmed" mt={6} maw={560}>
             Paper / Purpur / 原版 / Fabric 的 jar 由面板从官方源下载并按哈希校验；Forge 与基岩版需要手动上传。
@@ -187,7 +201,7 @@ export function Dashboard() {
               新建服务器
             </Button>
           )}
-        </Box>
+        </motion.div>
       )}
 
       <Modal opened={opened} onClose={() => setOpened(false)} title="新建服务器" size="md">

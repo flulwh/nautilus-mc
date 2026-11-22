@@ -27,10 +27,12 @@ import {
   IconUserCircle,
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { api, ApiError } from "./api";
+import { pageVariants, staggerContainer, staggerItem } from "./motion";
 import { AssistantPage } from "./pages/Assistant";
 import { AuditPage } from "./pages/Audit";
 import { Dashboard } from "./pages/Dashboard";
@@ -45,7 +47,15 @@ import type { Me } from "./types";
 function NavLink({ to, icon, label, active }: { to: string; icon: React.ReactNode; label: string; active: boolean }) {
   return (
     <Anchor component={Link} to={to} className="nav-item" data-active={active} underline="never">
-      {icon}
+      {/* A single shared indicator that physically slides between items. */}
+      {active && (
+        <motion.span
+          layoutId="nav-active"
+          className="nav-indicator"
+          transition={{ type: "spring", stiffness: 460, damping: 38, mass: 0.7 }}
+        />
+      )}
+      <span className="nav-icon">{icon}</span>
       <span>{label}</span>
     </Anchor>
   );
@@ -176,70 +186,115 @@ export function App() {
       </AppShell.Header>
 
       <AppShell.Navbar className="shell-nav" p="sm">
+        <motion.div
+          variants={staggerContainer(0.04)}
+          initial="hidden"
+          animate="show"
+        >
         <Stack gap={2} mt={2} h="100%">
-          <div className="section-label">运营</div>
-          <NavLink to="/" icon={<IconDashboard size={14} />} label="总览" active={location.pathname === "/"} />
-          <NavLink
-            to="/servers"
-            icon={<IconServer2 size={14} />}
-            label="服务器"
-            active={location.pathname.startsWith("/servers")}
-          />
-          <NavLink
-            to="/assistant"
-            icon={<IconRobot size={14} />}
-            label="AI 助手"
-            active={location.pathname === "/assistant"}
-          />
-          <div className="section-label">治理</div>
+          <motion.div variants={staggerItem} className="section-label">
+            运营
+          </motion.div>
+          <motion.div variants={staggerItem}>
+            <NavLink to="/" icon={<IconDashboard size={14} />} label="总览" active={location.pathname === "/"} />
+          </motion.div>
+          <motion.div variants={staggerItem}>
+            <NavLink
+              to="/servers"
+              icon={<IconServer2 size={14} />}
+              label="服务器"
+              active={location.pathname.startsWith("/servers")}
+            />
+          </motion.div>
+          <motion.div variants={staggerItem}>
+            <NavLink
+              to="/assistant"
+              icon={<IconRobot size={14} />}
+              label="AI 助手"
+              active={location.pathname === "/assistant"}
+            />
+          </motion.div>
+          <motion.div variants={staggerItem} className="section-label">
+            治理
+          </motion.div>
           {canAudit && (
-            <NavLink to="/audit" icon={<IconActivity size={14} />} label="审计日志" active={location.pathname === "/audit"} />
+            <motion.div variants={staggerItem}>
+              <NavLink to="/audit" icon={<IconActivity size={14} />} label="审计日志" active={location.pathname === "/audit"} />
+            </motion.div>
           )}
           {isAdmin && (
             <>
-              <NavLink
-                to="/users"
-                icon={<IconShieldLock size={14} />}
-                label="用户与角色"
-                active={location.pathname === "/users"}
-              />
-              <NavLink
-                to="/settings"
-                icon={<IconAdjustments size={14} />}
-                label="系统设置"
-                active={location.pathname === "/settings"}
-              />
+              <motion.div variants={staggerItem}>
+                <NavLink
+                  to="/users"
+                  icon={<IconShieldLock size={14} />}
+                  label="用户与角色"
+                  active={location.pathname === "/users"}
+                />
+              </motion.div>
+              <motion.div variants={staggerItem}>
+                <NavLink
+                  to="/settings"
+                  icon={<IconAdjustments size={14} />}
+                  label="系统设置"
+                  active={location.pathname === "/settings"}
+                />
+              </motion.div>
             </>
           )}
-          <Box mt="auto" px={10} py={8}>
-            <Anchor
-              href="https://github.com/flulwh/nautilus-mc"
-              target="_blank"
-              underline="never"
-              fz={11}
-              c="dimmed"
-            >
-              源码仓库
-            </Anchor>
-            <Text fz={10.5} c="dimmed" mt={2} className="mono">
-              fastapi · casbin
-            </Text>
-          </Box>
+          <motion.div variants={staggerItem}>
+            <Box mt="auto" px={10} py={8}>
+              <Anchor
+                href="https://github.com/flulwh/nautilus-mc"
+                target="_blank"
+                underline="never"
+                fz={11}
+                c="dimmed"
+              >
+                源码仓库
+              </Anchor>
+              <Text fz={10.5} c="dimmed" mt={2} className="mono">
+                fastapi · casbin
+              </Text>
+            </Box>
+          </motion.div>
         </Stack>
+        </motion.div>
       </AppShell.Navbar>
 
-      <AppShell.Main>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/servers" element={<Navigate to="/" replace />} />
-          <Route path="/servers/:id" element={<ServerDetail />} />
-          <Route path="/assistant" element={<AssistantPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/audit" element={canAudit ? <AuditPage /> : <Navigate to="/" replace />} />
-          <Route path="/users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
-          <Route path="/settings" element={isAdmin ? <SystemPage /> : <Navigate to="/" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+      <AppShell.Main className="shell-main">
+        {/* A one-shot light bar across the top edge marks a route change. */}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={location.pathname}
+            className="route-flash"
+            initial={{ opacity: 0.9, scaleX: 0.3 }}
+            animate={{ opacity: 0, scaleX: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.52, ease: [0.2, 0.9, 0.25, 1] }}
+          />
+        </AnimatePresence>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={location.pathname}
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/servers" element={<Navigate to="/" replace />} />
+              <Route path="/servers/:id" element={<ServerDetail />} />
+              <Route path="/assistant" element={<AssistantPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/audit" element={canAudit ? <AuditPage /> : <Navigate to="/" replace />} />
+              <Route path="/users" element={isAdmin ? <UsersPage /> : <Navigate to="/" replace />} />
+              <Route path="/settings" element={isAdmin ? <SystemPage /> : <Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </motion.div>
+        </AnimatePresence>
       </AppShell.Main>
     </AppShell>
   );

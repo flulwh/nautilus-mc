@@ -28,7 +28,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "../../api";
-import { ListEmpty, ListError, ListLoading } from "../../components/AsyncState";
+import { ListEmpty, ListError, SkeletonRows } from "../../components/AsyncState";
 import { useConfirm } from "../../components/Confirm";
 import type { FileEntry } from "../../types";
 
@@ -211,7 +211,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
       {list.isError ? (
         <ListError error={list.error} onRetry={() => void list.refetch()} />
       ) : list.isLoading ? (
-        <ListLoading label="读取目录…" />
+        <SkeletonRows rows={8} />
       ) : !shown.length ? (
         <ListEmpty label={search ? "没有匹配的文件" : "目录为空"} hint={search ? "换个关键词试试" : undefined} />
       ) : (

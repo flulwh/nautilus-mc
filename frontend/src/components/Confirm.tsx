@@ -1,5 +1,8 @@
 import { Button, Group, Modal, Text } from "@mantine/core";
+import { motion } from "motion/react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
+
+import { EASE } from "../motion";
 
 /**
  * 全局确认弹窗，取代散落各页的 window.confirm。
@@ -48,22 +51,32 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
         title={state?.title ?? "确认操作"}
         size="xs"
         centered
+        transitionProps={{ transition: "pop", duration: 180 }}
       >
-        <Text fz={12.5} mb="md" style={{ whiteSpace: "pre-wrap" }}>
-          {state?.message}
-        </Text>
-        <Group justify="flex-end" gap="xs">
-          <Button size="compact-sm" variant="default" onClick={() => finish(false)}>
-            {state?.cancelLabel ?? "取消"}
-          </Button>
-          <Button
-            size="compact-sm"
-            color={state?.danger === false ? "steelblue" : "red"}
-            onClick={() => finish(true)}
-          >
-            {state?.confirmLabel ?? "确认"}
-          </Button>
-        </Group>
+        {/* A danger confirmation should feel heavier than a normal one: the
+            message settles in, the confirm button stays visually hot. */}
+        <motion.div
+          key={state?.message ?? "none"}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: EASE.snap }}
+        >
+          <Text fz={12.5} mb="md" style={{ whiteSpace: "pre-wrap" }}>
+            {state?.message}
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button size="compact-sm" variant="default" onClick={() => finish(false)}>
+              {state?.cancelLabel ?? "取消"}
+            </Button>
+            <Button
+              size="compact-sm"
+              color={state?.danger === false ? "steelblue" : "red"}
+              onClick={() => finish(true)}
+            >
+              {state?.confirmLabel ?? "确认"}
+            </Button>
+          </Group>
+        </motion.div>
       </Modal>
     </ConfirmContext.Provider>
   );

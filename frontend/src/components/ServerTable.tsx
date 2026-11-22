@@ -1,7 +1,9 @@
 import { ActionIcon, Tooltip } from "@mantine/core";
 import { IconPlayerPlay, IconPlayerStop } from "@tabler/icons-react";
+import { motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
 
+import { staggerContainer, staggerItem } from "../motion";
 import type { Server } from "../types";
 import { StatusBadge } from "./StatusBadge";
 
@@ -31,7 +33,12 @@ export function ServerTable({
   const navigate = useNavigate();
 
   return (
-    <table className="srv-table">
+    <motion.table
+      className="srv-table"
+      variants={staggerContainer(0.035)}
+      initial="hidden"
+      animate="show"
+    >
       <thead>
         <tr>
           <th>名称</th>
@@ -52,7 +59,12 @@ export function ServerTable({
           const memPct = Math.min(100, (rt.rss_mb / Math.max(1, server.memory_mb)) * 100);
 
           return (
-            <tr key={server.id} onClick={() => navigate(`/servers/${server.id}`)}>
+            <motion.tr
+              key={server.id}
+              variants={staggerItem}
+              onClick={() => navigate(`/servers/${server.id}`)}
+              whileTap={{ scale: 0.995 }}
+            >
               <td>
                 <div className="srv-name">
                   {server.name}
@@ -77,9 +89,14 @@ export function ServerTable({
               <td className="num">{rt.pid ? `${rt.cpu.toFixed(0)}%` : "—"}</td>
               <td className="num">
                 {installing ? (
-                  <span className="mono" style={{ color: "var(--accent-text)" }}>
+                  <motion.span
+                    className="mono"
+                    style={{ color: "var(--accent-text)", display: "inline-block" }}
+                    animate={{ opacity: [0.55, 1, 0.55] }}
+                    transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                  >
                     安装 {rt.install_pct}%
-                  </span>
+                  </motion.span>
                 ) : rt.pid ? (
                   <span style={{ color: memPct > 85 ? "var(--bad)" : undefined }}>
                     {rt.rss_mb.toFixed(0)} / {server.memory_mb} MB
@@ -103,10 +120,10 @@ export function ServerTable({
                   </Tooltip>
                 )}
               </td>
-            </tr>
+            </motion.tr>
           );
         })}
       </tbody>
-    </table>
+    </motion.table>
   );
 }

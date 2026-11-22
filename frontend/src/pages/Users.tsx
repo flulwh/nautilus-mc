@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, ApiError } from "../api";
+import { SkeletonRows } from "../components/AsyncState";
 import { useConfirm } from "../components/Confirm";
 import type { Me, UserRow } from "../types";
 
@@ -81,7 +82,10 @@ export function UsersPage() {
       </Group>
 
       <Card className="glass" p="md" withBorder>
-        <Table verticalSpacing="xs">
+        {users.isLoading ? (
+          <SkeletonRows rows={6} />
+        ) : (
+        <Table verticalSpacing="xs" className="stagger-rows">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>用户</Table.Th>
@@ -175,6 +179,7 @@ export function UsersPage() {
             })}
           </Table.Tbody>
         </Table>
+        )}
       </Card>
 
       <Card className="glass" p="md" withBorder>

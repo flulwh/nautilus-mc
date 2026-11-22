@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api } from "../api";
+import { SkeletonRows } from "../components/AsyncState";
 import type { AuditEntry } from "../types";
 
 const ACTION_COLORS: Record<string, string> = {
@@ -111,7 +112,10 @@ export function AuditPage() {
       </Group>
 
       <Card className="glass" p="md" withBorder>
-        <Table verticalSpacing="xs">
+        {audit.isLoading ? (
+          <SkeletonRows rows={8} />
+        ) : (
+        <Table verticalSpacing="xs" className="stagger-rows-alt">
           <Table.Thead>
             <Table.Tr>
               <Table.Th w={150}>时间</Table.Th>
@@ -187,6 +191,7 @@ export function AuditPage() {
             )}
           </Table.Tbody>
         </Table>
+        )}
 
         <Group justify="space-between" mt="md">
           <Text size="10.5px" c="dimmed">

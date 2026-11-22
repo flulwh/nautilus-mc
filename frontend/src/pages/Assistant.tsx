@@ -34,9 +34,11 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "../api";
+import { EASE } from "../motion";
 import type { AiConfig } from "../types";
 
 /** 工具说明来自 docstring，会带 markdown 记号；界面上按纯文本显示。 */
@@ -635,12 +637,18 @@ export function AssistantPage() {
                 还没有历史会话
               </Text>
             )}
-            {items.map((item) => (
-              <Group
+            {items.map((item, idx) => (
+              <motion.div
                 key={item.id}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.26, ease: EASE.snap, delay: Math.min(idx, 10) * 0.03 }}
+              >
+              <Group
                 gap={2}
                 wrap="nowrap"
                 p={5}
+                className="conv-item"
                 style={{
                   cursor: "pointer",
                   background: item.id === activeId ? "var(--panel-2, var(--panel))" : undefined,
@@ -683,6 +691,7 @@ export function AssistantPage() {
                   <IconTrash size={11} />
                 </ActionIcon>
               </Group>
+              </motion.div>
             ))}
           </Stack>
         </ScrollArea>
@@ -702,9 +711,12 @@ export function AssistantPage() {
               {info.label}
             </Badge>
             {stage && (
-              <Text fz={10.5} c="dimmed" truncate style={{ maxWidth: 240 }}>
-                {stage}
-              </Text>
+              <Group gap={5} wrap="nowrap" style={{ maxWidth: 240 }}>
+                <span className="stage-led" aria-hidden="true" />
+                <Text fz={10.5} c="dimmed" truncate>
+                  {stage}
+                </Text>
+              </Group>
             )}
           </Group>
           <Group gap={4}>
@@ -750,7 +762,13 @@ export function AssistantPage() {
 
           <Stack gap="sm">
             {bubbles.map((bubble) => (
-              <Box key={bubble.key}>
+              <motion.div
+                key={bubble.key}
+                className="msg-enter"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.32, ease: EASE.snap }}
+              >
                 {bubble.role === "user" ? (
                   <Group justify="flex-end">
                     <Card p="xs" radius="sm" bg="var(--panel)" withBorder style={{ maxWidth: "78%" }}>
@@ -766,13 +784,15 @@ export function AssistantPage() {
                 ) : (
                   <Stack gap={6}>
                     {bubble.thinking && (
-                      <Box
-                        p="xs"
+                      <motion.div
+                        className="thinking-block"
                         style={{
+                          padding: "var(--mantine-spacing-xs)",
                           borderLeft: "2px solid var(--accent, var(--dim))",
                           background: "var(--panel-2, var(--panel))",
                           opacity: 0.92,
                         }}
+                        layout
                       >
                         <Group
                           gap={6}
@@ -808,7 +828,7 @@ export function AssistantPage() {
                             {!bubble.thinkingDone && <span className="chat-caret" />}
                           </Text>
                         )}
-                      </Box>
+                      </motion.div>
                     )}
 
                     {bubble.busy && !bubble.thinking && !bubble.text && (
@@ -821,28 +841,48 @@ export function AssistantPage() {
                     )}
 
                     {bubble.plan && bubble.plan.steps.length > 0 && (
-                      <Box p="xs" style={{ borderLeft: "2px solid var(--line)" }}>
+                      <motion.div
+                        className="plan-block"
+                        style={{ padding: "var(--mantine-spacing-xs)", borderLeft: "2px solid var(--line)" }}
+                        layout
+                      >
                         <Text fz={11} fw={600}>
                           {bubble.plan.title}
                         </Text>
                         {bubble.plan.steps.map((step, i) => (
-                          <Group key={i} gap={6} wrap="nowrap">
-                            <Text fz={10.5} c="dimmed" className="mono">
-                              {step.status === "done" ? "x" : step.status === "doing" ? ">" : step.status === "blocked" ? "!" : "-"}
-                            </Text>
-                            <Text
-                              fz={11}
-                              c={step.status === "done" ? "dimmed" : undefined}
-                              td={step.status === "done" ? "line-through" : undefined}
-                            >
-                              {step.text}
-                            </Text>
-                          </Group>
+                          <motion.div
+                            key={i}
+                            initial={{ opacity: 0, x: -6 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.26, ease: EASE.snap, delay: i * 0.05 }}
+                          >
+                            <Group gap={6} wrap="nowrap">
+                              <Text
+                                fz={10.5}
+                                c={step.status === "blocked" ? "red" : step.status === "doing" ? "var(--accent-text)" : "dimmed"}
+                                className="mono"
+                                style={
+                                  step.status === "doing"
+                                    ? { animation: "thinking-pulse 1.3s ease-in-out infinite" }
+                                    : undefined
+                                }
+                              >
+                                {step.status === "done" ? "x" : step.status === "doing" ? ">" : step.status === "blocked" ? "!" : "-"}
+                              </Text>
+                              <Text
+                                fz={11}
+                                c={step.status === "done" ? "dimmed" : undefined}
+                                td={step.status === "done" ? "line-through" : undefined}
+                              >
+                                {step.text}
+                              </Text>
+                            </Group>
+                          </motion.div>
                         ))}
-                      </Box>
+                      </motion.div>
                     )}
 
-                    {bubble.tools.map((tool) => {
+                    {bubble.tools.map((tool, toolIndex) => {
                       const open = expanded.has(tool.id);
                       const elapsed =
                         tool.startedAt && tool.finishedAt ? `${Math.max(0, tool.finishedAt - tool.startedAt)}ms` : "";
@@ -855,7 +895,13 @@ export function AssistantPage() {
                               ? "失败"
                               : "完成";
                       return (
-                        <Group key={tool.id || tool.name} gap={6} wrap="nowrap" align="flex-start">
+                        <motion.div
+                          key={tool.id || tool.name}
+                          className={`tool-enter ${tool.status === "running" ? "trace-running" : ""}`}
+                          style={{ "--step-delay": `${toolIndex * 60}ms` } as React.CSSProperties}
+                          layout
+                        >
+                        <Group gap={6} wrap="nowrap" align="flex-start">
                           {tool.status === "running" ? (
                             <Loader size={11} />
                           ) : tool.status === "failed" ? (
@@ -910,6 +956,7 @@ export function AssistantPage() {
                             )}
                           </Stack>
                         </Group>
+                        </motion.div>
                       );
                     })}
 
@@ -972,7 +1019,7 @@ export function AssistantPage() {
                     )}
                   </Stack>
                 )}
-              </Box>
+              </motion.div>
             ))}
           </Stack>
         </ScrollArea>
@@ -1001,11 +1048,18 @@ export function AssistantPage() {
               }}
             />
             {busy ? (
-              <ActionIcon variant="default" size="lg" onClick={stop} aria-label="停止">
+              <ActionIcon variant="default" size="lg" onClick={stop} aria-label="停止" className="btn-busy">
                 <IconPlayerStop size={15} />
               </ActionIcon>
             ) : (
-              <ActionIcon variant="filled" size="lg" onClick={() => void send()} disabled={!input.trim()} aria-label="发送">
+              <ActionIcon
+                variant="filled"
+                size="lg"
+                onClick={() => void send()}
+                disabled={!input.trim()}
+                aria-label="发送"
+                className="btn-press"
+              >
                 <IconArrowUp size={15} />
               </ActionIcon>
             )}
@@ -1106,7 +1160,11 @@ export function AssistantPage() {
                 </Text>
               )}
 
-              <Stack gap={0} style={{ borderLeft: "1px solid var(--line)", marginLeft: 6 }}>
+              <Stack
+                gap={0}
+                className="trace-rail"
+                style={{ borderLeft: "1px solid var(--line)", marginLeft: 6 }}
+              >
                 {traceRun.steps.map((step) => {
                   const meta = TRACE_STEP[step.kind] ?? TRACE_STEP.note;
                   const stat = TRACE_STATUS[step.status] ?? TRACE_STATUS.running;
@@ -1114,7 +1172,12 @@ export function AssistantPage() {
                   const open = expanded.has(key);
                   const hasPayload = Boolean(step.detail || step.result || (step.args && JSON.stringify(step.args) !== "{}"));
                   return (
-                    <Box key={key} pl="sm" py={6} style={{ position: "relative" }}>
+                    <motion.div
+                      key={key}
+                      className={`trace-step ${step.status === "running" ? "trace-running" : ""}`}
+                      style={{ "--step-delay": `${Math.min(step.seq, 12) * 55}ms` } as React.CSSProperties}
+                    >
+                    <Box pl="sm" py={6} style={{ position: "relative" }}>
                       <Box
                         style={{
                           position: "absolute",
@@ -1205,6 +1268,7 @@ export function AssistantPage() {
                         </>
                       )}
                     </Box>
+                    </motion.div>
                   );
                 })}
               </Stack>

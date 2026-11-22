@@ -13,6 +13,9 @@ export default defineConfig({
           react: ["react", "react-dom", "react-router-dom"],
           mantine: ["@mantine/core", "@mantine/hooks", "@mantine/notifications"],
           data: ["@tanstack/react-query"],
+          // The animation runtime is only needed once a route mounts; keeping
+          // it in its own chunk stops it from bloating the entry bundle.
+          motion: ["motion/react", "motion-dom", "motion-utils"],
         },
       },
     },

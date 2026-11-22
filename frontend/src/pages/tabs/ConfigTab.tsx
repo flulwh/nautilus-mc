@@ -6,7 +6,6 @@ import {
   Card,
   Grid,
   Group,
-  Loader,
   ScrollArea,
   Select,
   Stack,
@@ -21,6 +20,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../../api";
+import { Skeleton } from "../../components/AsyncState";
 
 interface Doc {
   format: string;
@@ -211,9 +211,13 @@ export function ConfigTab({ serverId }: { serverId: number }) {
       <Grid.Col span={{ base: 12, md: 9 }}>
         <Card className="glass" p="md" withBorder>
           {doc.isLoading ? (
-            <Group justify="center" py="xl">
-              <Loader size="sm" color="steelblue" />
-            </Group>
+            <Stack gap={0} py="sm" aria-busy="true">
+              {Array.from({ length: 12 }, (_, i) => (
+                <div key={i} style={{ padding: "3px 0" }}>
+                  <Skeleton h={11} w={`${40 + ((i * 17) % 55)}%`} />
+                </div>
+              ))}
+            </Stack>
           ) : (
             <Stack gap="sm">
               <Group justify="space-between">

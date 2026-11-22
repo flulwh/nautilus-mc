@@ -1,8 +1,10 @@
 import { Alert, Box, Button, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
+import { motion } from "motion/react";
 import { useState } from "react";
 
 import { api, ApiError } from "../api";
+import { EASE, staggerContainer, staggerItem } from "../motion";
 
 export function Login({ onSuccess, authError }: { onSuccess: () => void; authError?: string }) {
   const [identifier, setIdentifier] = useState("");
@@ -26,39 +28,58 @@ export function Login({ onSuccess, authError }: { onSuccess: () => void; authErr
 
   return (
     <div className="login-shell">
-      <div className="login-art">
-        <div className="brand-mark">
+      <motion.div
+        className="login-art"
+        initial="hidden"
+        animate="show"
+        variants={staggerContainer(0.07)}
+      >
+        <motion.div className="brand-mark" variants={staggerItem}>
           <span className="brand-dot" />
           Nautilus
-        </div>
+        </motion.div>
 
-        <div className="login-body">
+        <motion.div className="login-body" variants={staggerItem}>
           <h1 className="hero-title">Minecraft 服务端管理面板</h1>
           <p className="hero-sub">
             单进程运行，直接管理服务器目录下的 jar 与配置文件。没有守护进程，也不依赖外部中间件。
           </p>
 
-          <dl className="spec-list mono">
-            <dt>运行时</dt>
-            <dd>FastAPI · Uvicorn（单 worker）</dd>
-            <dt>鉴权</dt>
-            <dd>Casbin RBAC · HttpOnly Cookie</dd>
-            <dt>存储</dt>
-            <dd>SQLite（WAL）· Alembic 迁移</dd>
-            <dt>进程</dt>
-            <dd>asyncio + psutil 进程树采样</dd>
-            <dt>前端</dt>
-            <dd>React · Vite · Mantine</dd>
-          </dl>
-        </div>
+          <motion.dl
+            className="spec-list mono"
+            variants={staggerContainer(0.045)}
+            initial="hidden"
+            animate="show"
+          >
+            {[
+              ["运行时", "FastAPI · Uvicorn（单 worker）"],
+              ["鉴权", "Casbin RBAC · HttpOnly Cookie"],
+              ["存储", "SQLite（WAL）· Alembic 迁移"],
+              ["进程", "asyncio + psutil 进程树采样"],
+              ["前端", "React · Vite · Mantine"],
+            ].map(([k, v]) => (
+              <motion.div key={k} style={{ display: "contents" }} variants={staggerItem}>
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              </motion.div>
+            ))}
+          </motion.dl>
+        </motion.div>
 
-        <Text fz={10.5} c="dimmed" className="mono">
-          nautilus 0.1.0 · MIT
-        </Text>
-      </div>
+        <motion.div variants={staggerItem}>
+          <Text fz={10.5} c="dimmed" className="mono">
+            nautilus 0.1.0 · MIT
+          </Text>
+        </motion.div>
+      </motion.div>
 
       <Box style={{ display: "grid", placeItems: "center", padding: 24 }}>
-        <Box w={320}>
+        <motion.div
+          style={{ width: 320 }}
+          initial={{ opacity: 0, x: 18 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5, ease: EASE.snap, delay: 0.12 }}
+        >
           <Text fz={13} fw={600} mb={2}>
             登录
           </Text>
@@ -85,9 +106,15 @@ export function Login({ onSuccess, authError }: { onSuccess: () => void; authErr
                 required
               />
               {error && (
-                <Alert color="red" variant="light" icon={<IconAlertCircle size={14} />} p={6}>
-                  <Text fz={11.5}>{error}</Text>
-                </Alert>
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  transition={{ duration: 0.24, ease: EASE.snap }}
+                >
+                  <Alert color="red" variant="light" icon={<IconAlertCircle size={14} />} p={6}>
+                    <Text fz={11.5}>{error}</Text>
+                  </Alert>
+                </motion.div>
               )}
               <Button type="submit" size="xs" loading={loading} mt={4} fullWidth>
                 登录
@@ -98,7 +125,7 @@ export function Login({ onSuccess, authError }: { onSuccess: () => void; authErr
           <Text fz={10.5} c="dimmed" mt={18} style={{ lineHeight: 1.7 }}>
             首次启动时初始管理员密码打印在服务端日志中。连续 5 次失败锁定账号 15 分钟。
           </Text>
-        </Box>
+        </motion.div>
       </Box>
     </div>
   );

@@ -13,6 +13,7 @@ import { BrowserRouter } from "react-router-dom";
 
 import { App } from "./App";
 import { ConfirmProvider } from "./components/Confirm";
+import { MotionProvider } from "./motion";
 import { nautilusTheme } from "./theme";
 
 const queryClient = new QueryClient({
@@ -31,9 +32,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <MantineProvider theme={nautilusTheme} defaultColorScheme="light">
         <Notifications position="top-right" limit={3} />
         <BrowserRouter>
-          <ConfirmProvider>
-            <App />
-          </ConfirmProvider>
+          <MotionProvider>
+            <ConfirmProvider>
+              <App />
+            </ConfirmProvider>
+          </MotionProvider>
         </BrowserRouter>
       </MantineProvider>
     </QueryClientProvider>

@@ -30,11 +30,14 @@ import {
   IconWorld,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { Suspense, lazy, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api, ApiError } from "../api";
+import { Skeleton } from "../components/AsyncState";
 import { StatusBadge } from "../components/StatusBadge";
+import { EASE } from "../motion";
 import { hasPerm } from "../perm";
 import type { Me, Server } from "../types";
 import { useSocket } from "../useSocket";
@@ -52,9 +55,31 @@ const WorldsTab = lazy(() => import("./tabs/WorldsTab").then((m) => ({ default: 
 
 function TabFallback() {
   return (
-    <Group justify="center" py="xl">
-      <Loader size="sm" color="steelblue" />
-    </Group>
+    <Stack gap={0} py="sm" aria-busy="true">
+      <Skeleton h={13} w="38%" />
+      <Skeleton h={13} w="62%" />
+      <Skeleton h={13} w="54%" />
+      <Skeleton h={13} w="71%" />
+    </Stack>
+  );
+}
+
+/**
+ * Wraps a lazily loaded tab panel: a skeleton while the chunk downloads, then
+ * a short settle so switching tabs feels like an instrument switching
+ * channels rather than a hard cut.
+ */
+function TabBody({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<TabFallback />}>
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.26, ease: EASE.snap }}
+      >
+        {children}
+      </motion.div>
+    </Suspense>
   );
 }
 
@@ -285,70 +310,70 @@ export function ServerDetail() {
 
         {tabs.console && (
           <Tabs.Panel value="console" pt="sm">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <ConsoleTab serverId={serverId} canSend={can("console")} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         {tabs.players && (
           <Tabs.Panel value="players" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <PlayersTab serverId={serverId} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         {tabs.files && (
           <Tabs.Panel value="files" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <FilesTab serverId={serverId} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         {tabs.config && (
           <Tabs.Panel value="config" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <ConfigTab serverId={serverId} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         {tabs.plugins && (
           <Tabs.Panel value="plugins" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <PluginsTab serverId={serverId} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         {tabs.worlds && (
           <Tabs.Panel value="worlds" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <WorldsTab serverId={serverId} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         {tabs.backups && (
           <Tabs.Panel value="backups" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <BackupsTab serverId={serverId} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         {tabs.tasks && (
           <Tabs.Panel value="tasks" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <TasksTab serverId={serverId} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
         <Tabs.Panel value="metrics" pt="md">
-          <Suspense fallback={<TabFallback />}>
+          <TabBody>
             <MetricsTab serverId={serverId} />
-          </Suspense>
+          </TabBody>
         </Tabs.Panel>
         {tabs.settings && (
           <Tabs.Panel value="settings" pt="md">
-            <Suspense fallback={<TabFallback />}>
+            <TabBody>
               <SettingsTab server={s} onChanged={() => server.refetch()} canDelete={can("delete")} />
-            </Suspense>
+            </TabBody>
           </Tabs.Panel>
         )}
       </Tabs>
