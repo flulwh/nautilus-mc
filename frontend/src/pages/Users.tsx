@@ -109,8 +109,8 @@ export function UsersPage() {
                           borderRadius: 8,
                           display: "grid",
                           placeItems: "center",
-                          background: "rgba(53,198,225,0.12)",
-                          color: "#63d8ee",
+                          background: "var(--panel-2)",
+                          color: "var(--text)",
                           fontSize: 12,
                           fontWeight: 600,
                         }}
@@ -184,7 +184,7 @@ export function UsersPage() {
 
       <Card className="glass" p="md" withBorder>
         <Group gap={8} mb={8}>
-          <IconUserShield size={15} color="#6b8095" />
+          <IconUserShield size={15} color="var(--dim)" />
           <Text className="stat-label">角色说明</Text>
         </Group>
         <Stack gap={4}>

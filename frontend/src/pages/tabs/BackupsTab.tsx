@@ -181,7 +181,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
 
       <Card className="glass" p={0} withBorder>
         {data?.archives.length ? (
-          <ScrollArea h="calc(100vh - 430px)" type="hover" scrollbars="y" offsetScrollbars>
+          <ScrollArea h="calc(100vh - 384px)" type="hover" scrollbars="y" offsetScrollbars>
             <Table verticalSpacing="sm" horizontalSpacing="md" highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
@@ -197,7 +197,7 @@ export function BackupsTab({ serverId }: { serverId: number }) {
                   <Table.Tr key={a.name}>
                     <Table.Td>
                       <Group gap={6} wrap="nowrap">
-                        <IconArchive size={15} color="#5d8496" />
+                        <IconArchive size={15} color="var(--dim)" />
                         <Stack gap={0} style={{ minWidth: 0 }}>
                           <Text size="sm" className="mono" truncate>
                             {a.label || a.name}

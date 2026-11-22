@@ -181,7 +181,7 @@ export function AuditPage() {
               <Table.Tr>
                 <Table.Td colSpan={6}>
                   <Stack align="center" py="lg" gap={6}>
-                    <IconActivity size={22} color="#3d5568" />
+                    <IconActivity size={22} color="var(--dim)" />
                     <Text size="xs" c="dimmed">
                       暂无记录
                     </Text>

@@ -143,7 +143,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
         <Group justify="space-between" align="flex-start">
           <Stack gap={2}>
             <Group gap={8}>
-              <IconCalendarTime size={16} color="#5d8496" />
+              <IconCalendarTime size={16} color="var(--dim)" />
               <Title order={4}>定时任务</Title>
               <Badge size="sm" variant="light" color="steelblue">
                 {tasks.length}
@@ -162,7 +162,7 @@ export function TasksTab({ serverId }: { serverId: number }) {
 
       <Card className="glass" p={0} withBorder>
         {tasks.length ? (
-          <ScrollArea h="calc(100vh - 380px)" type="hover" scrollbars="y" offsetScrollbars>
+          <ScrollArea h="calc(100vh - 334px)" type="hover" scrollbars="y" offsetScrollbars>
             <Table verticalSpacing="sm" horizontalSpacing="md" highlightOnHover>
               <Table.Thead>
                 <Table.Tr>

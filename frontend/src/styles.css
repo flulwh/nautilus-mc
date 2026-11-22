@@ -1,35 +1,46 @@
-/* Industrial console — light is the default surface. */
+/* =====================================================================
+   Codex desktop design layer.
+
+   Neutral surfaces, monochrome ink accent, soft 1px borders, 6-12px
+   radii. Dark is the default scheme (the app's most recognisable
+   state); light is a full alternate. Code surfaces stay dark in
+   both. References: github.com/Wangnov/awesome-codex-skins ·
+   github.com/xuhuanstudio/codex-styler
+   ===================================================================== */
+
 :root,
-[data-mantine-color-scheme="light"] {
-  --bg: #eceff2;
-  --panel: #f8f9fa;
-  --panel-2: #eef1f4;
-  --line: #c9d0d6;
-  --line-strong: #9aa4ad;
-  --grid-line: rgba(47, 86, 125, 0.055);
-  --text: #1a2026;
-  --dim: #5d6872;
-  --accent: #2f567d;
-  --accent-text: #2f567d;
-  --ok: #2f6a54;
-  --warn: #8a6520;
-  --bad: #a23333;
+[data-mantine-color-scheme="dark"] {
+  --bg: #0d0d0f;
+  --panel: #161618;
+  --panel-2: #1f1f22;
+  --line: #27272b;
+  --line-strong: #3a3a40;
+  --text: #e8e8ea;
+  --dim: #8e8e96;
+  --accent: #f2f2f3;
+  --accent-text: #f2f2f3;
+  --on-accent: #16161a;
+  --ok: #48c487;
+  --warn: #d4a341;
+  --bad: #e5534b;
+  --surface-2: rgba(255, 255, 255, 0.04);
 }
 
-[data-mantine-color-scheme="dark"] {
-  --bg: #12161b;
-  --panel: #181d23;
-  --panel-2: #20262d;
-  --line: #2c343d;
-  --line-strong: #414b56;
-  --grid-line: rgba(111, 158, 196, 0.05);
-  --text: #d3dae1;
-  --dim: #8a949e;
-  --accent: #6f9ec4;
-  --accent-text: #9dc2dd;
-  --ok: #5e9b7e;
-  --warn: #a8842c;
-  --bad: #b04a4a;
+[data-mantine-color-scheme="light"] {
+  --bg: #ffffff;
+  --panel: #fafafb;
+  --panel-2: #f0f0f2;
+  --line: #e5e5e8;
+  --line-strong: #c9c9cf;
+  --text: #1b1b1e;
+  --dim: #6f6f78;
+  --accent: #16161a;
+  --accent-text: #16161a;
+  --on-accent: #ffffff;
+  --ok: #1f9d63;
+  --warn: #b5852f;
+  --bad: #c9372f;
+  --surface-2: rgba(0, 0, 0, 0.03);
 }
 
 * {
@@ -46,8 +57,8 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-size: 13px;
-  -webkit-font-smoothing: auto;
+  font-size: 13.5px;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ------------------------------------------------------------------ layout */
@@ -57,32 +68,76 @@ body {
   background: var(--panel);
 }
 
-.nav-item {
+/* Anchor for the route-change flash bar. */
+.shell-main {
+  position: relative;
+}
+
+/* Codex-style sidebar: brand row at top, nav in the middle, user at bottom. */
+.side-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border-radius: 0;
+  padding: 4px 8px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.side-foot {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  padding: 7px 10px;
+  border-radius: 6px;
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 13px;
   text-decoration: none;
 }
 
+.nav-item > span {
+  position: relative;
+  z-index: 1;
+}
+
 .nav-item:hover {
-  background: var(--panel-2);
   color: var(--text);
 }
 
 .nav-item[data-active="true"] {
-  background: var(--panel-2);
-  box-shadow: inset 2px 0 0 var(--accent);
   color: var(--text);
-  font-weight: 600;
+  font-weight: 500;
+}
+
+/* The shared layoutId indicator: a rounded highlight that slides
+   between items, like the active task row in Codex. */
+.nav-indicator {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: var(--panel-2);
+  z-index: 0;
+}
+
+.nav-item .nav-icon {
+  display: inline-flex;
+  transition: transform 200ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.nav-item:hover .nav-icon {
+  transform: translateX(2px);
 }
 
 .section-label {
-  margin: 16px 0 4px 10px;
-  font-size: 11px;
+  margin: 14px 0 4px 10px;
+  font-size: 11.5px;
   font-weight: 400;
   color: var(--dim);
 }
@@ -92,7 +147,14 @@ body {
 .glass {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 2px;
+  border-radius: 8px;
+}
+
+/* The composer bar at the bottom of the assistant card. */
+.composer {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 0 0 8px 8px;
 }
 
 /* 流式输出时跟在最后一个字后面的光标，不用动画库 */
@@ -148,68 +210,64 @@ body {
 
 /* ---------------------------------------------------------- dashboard list */
 
+/* Codex tiles: separate rounded cards with a gap, not one shared strip. */
 .stat-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--line);
-  background: var(--panel);
+  gap: 10px;
 }
 
 .stat-strip > div {
-  padding: 10px 12px;
-  border-right: 1px solid var(--line);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
   min-width: 0;
-}
-
-.stat-strip > div:last-child {
-  border-right: 0;
 }
 
 @media (max-width: 640px) {
   .stat-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .stat-strip > div:nth-child(2n) {
-    border-right: 0;
-  }
-  .stat-strip > div:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--line);
-  }
 }
 
 .stat-value {
-  font-size: 18px;
-  font-weight: 500;
+  font-size: 20px;
+  font-weight: 600;
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 400;
   color: var(--dim);
 }
 
 .srv-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   border: 1px solid var(--line);
   background: var(--panel);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .srv-table th {
   text-align: left;
-  font-size: 11px;
-  font-weight: 400;
+  font-size: 11.5px;
+  font-weight: 500;
   color: var(--dim);
-  padding: 6px 8px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--panel-2);
   white-space: nowrap;
 }
 
 .srv-table td {
-  padding: 7px 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
   white-space: nowrap;
@@ -243,7 +301,7 @@ body {
 .status-dot {
   width: 7px;
   height: 7px;
-  border-radius: 1px;
+  border-radius: 50%;
   display: inline-block;
   flex: 0 0 auto;
   background: var(--dim);
@@ -259,7 +317,7 @@ body {
 }
 
 .status-dot.stopped {
-  background: #5b646e;
+  background: #5b5f66;
 }
 
 .status-dot.crashed {
@@ -267,12 +325,46 @@ body {
 }
 
 .status-text {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text);
 }
 
 .status-text.stopped {
   color: var(--dim);
+}
+
+/* Online players list row. */
+.player-row {
+  border-radius: 6px;
+  padding: 4px 8px;
+  transition: background-color 140ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.player-row:hover {
+  background: var(--panel-2);
+}
+
+/* A player that is currently connected — breathes in the ok colour. */
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  background: var(--ok);
+  animation: pulse-dot 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
 }
 
 .mono {
@@ -286,21 +378,22 @@ body {
 
 /* ---------------------------------------------------------------- console */
 
+/* Terminals and code are content surfaces: they stay dark in both schemes. */
 .console-wrap {
-  border-radius: 0;
+  border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--line);
-  background: #0b0e11;
+  background: #0a0a0c;
 }
 
 .console-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px;
-  background: #12161a;
+  padding: 6px 12px;
+  background: #101013;
   border-bottom: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--dim);
 }
 
@@ -312,7 +405,7 @@ body {
 
 .console-input {
   border-top: 1px solid var(--line);
-  background: #0d1114;
+  background: #0c0c0e;
 }
 
 .log-line {
@@ -322,11 +415,11 @@ body {
 }
 
 .log-line.warn {
-  color: #b99a52;
+  color: #d9b568;
 }
 
 .log-line.error {
-  color: #c07070;
+  color: #d98178;
 }
 
 /* ------------------------------------------------------------------ misc */
@@ -334,13 +427,13 @@ body {
 .code-editor {
   width: 100%;
   min-height: 420px;
-  border-radius: 0;
+  border-radius: 8px;
   border: 1px solid var(--line);
-  background: #0b0e11;
-  color: #c2c9d1;
-  padding: 10px 12px;
+  background: #0a0a0c;
+  color: #c8cad0;
+  padding: 12px 14px;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.6;
   resize: vertical;
   outline: none;
@@ -349,18 +442,11 @@ body {
 
 .code-editor:focus {
   border-color: var(--line-strong);
-  outline: 1px solid var(--line-strong);
-  outline-offset: -1px;
-}
-
-[data-mantine-color-scheme="light"] .code-editor {
-  background: #fbfbfc;
-  color: #1e2328;
 }
 
 .file-row {
   cursor: pointer;
-  border-radius: 0;
+  border-radius: 6px;
 }
 
 .file-row:hover {
@@ -373,7 +459,7 @@ body {
 
 .empty-hint {
   color: var(--dim);
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.6;
 }
 
@@ -383,12 +469,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2c333b;
-  border: 2px solid var(--bg);
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a424b;
+  background: var(--dim);
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-track {
@@ -429,7 +519,7 @@ body {
 }
 
 .login-art {
-  padding: 32px 40px 26px;
+  padding: 36px 44px 28px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -445,31 +535,33 @@ body {
 .brand-mark {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 9px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text);
 }
 
+/* Codex monogram: a soft rounded square, calm — it no longer beats. */
 .brand-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 1px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
   background: var(--accent);
 }
 
 .hero-title {
   margin: 0 0 10px;
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
 .hero-sub {
   margin: 0;
   max-width: 440px;
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.7;
 }
 
@@ -477,7 +569,7 @@ body {
   margin: 22px 0 0;
   display: grid;
   grid-template-columns: 92px 1fr;
-  gap: 5px 12px;
+  gap: 6px 12px;
   font-size: 12px;
 }
 
@@ -491,36 +583,22 @@ body {
 }
 
 /* ==================================================================
-   Motion layer — "instrument panel" choreography.
+   Motion layer — Codex choreography.
 
-   Everything here is decorative feedback: the app still works with
-   every animation removed, and every rule here is disabled under
-   prefers-reduced-motion (see the block at the bottom).
+   Calm and short: things arrive, they do not flash. Everything here
+   only animates transform / opacity, and the whole layer collapses
+   under prefers-reduced-motion (bottom of this file).
    ================================================================== */
 
-/* --- backdrop: a faint engineering grid so panels read as an
-       instrument face rather than a flat white sheet -------------
-       Scoped to the app shell: the login screen is its own surface
-       and should stay clean. */
-
-.shell-main {
-  background-color: var(--bg);
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-position: -1px -1px;
-  position: relative;
-}
-
-/* --- focus: a hard square ring, consistent with the 2px radius --- */
+/* --- focus: a soft ring from the text colour, scheme-safe ------------ */
 
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--text) 55%, transparent);
   outline-offset: 1px;
+  border-radius: 4px;
 }
 
-/* --- press feedback: things sink, they do not bounce ------------- */
+/* --- press feedback: things sink, they do not bounce ----------------- */
 
 :where(button, .mantine-ActionIcon-root, .nav-item, .srv-table tbody tr) {
   transition:
@@ -535,33 +613,7 @@ body {
   transform: translateY(1px);
 }
 
-/* --- nav: the active marker slides between items ------------------ */
-
-.nav-item {
-  position: relative;
-}
-
-.nav-indicator {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 2px;
-  height: 60%;
-  background: var(--accent);
-  transform: translateY(-50%);
-  border-radius: 1px;
-}
-
-.nav-item .nav-icon {
-  display: inline-flex;
-  transition: transform 200ms cubic-bezier(0.2, 0.9, 0.25, 1);
-}
-
-.nav-item:hover .nav-icon {
-  transform: translateX(2px);
-}
-
-/* --- status dot: a live running server breathes ------------------- */
+/* --- status dot: a live running server breathes ---------------------- */
 
 .status-dot {
   position: relative;
@@ -572,6 +624,7 @@ body {
   position: absolute;
   inset: -3px;
   border: 1px solid var(--ok);
+  border-radius: 50%;
   opacity: 0;
   animation: dot-halo 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
@@ -582,6 +635,7 @@ body {
   position: absolute;
   inset: -3px;
   border: 1px solid var(--warn);
+  border-radius: 50%;
   opacity: 0;
   animation: dot-halo 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
@@ -601,14 +655,14 @@ body {
   }
 }
 
-/* --- skeleton: a sweep, like a radar trace crossing the panel ----- */
+/* --- skeleton: a sweep ------------------------------------------------ */
 
 .skeleton {
   position: relative;
   overflow: hidden;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 2px;
+  border-radius: 8px;
 }
 
 .skeleton::after {
@@ -632,40 +686,11 @@ body {
 }
 
 .skeleton-row {
-  height: 13px;
-  margin-bottom: 7px;
+  height: 14px;
+  margin-bottom: 8px;
 }
 
-/* --- stat strip: the divider draws itself in ---------------------- */
-
-.stat-strip {
-  position: relative;
-  overflow: hidden;
-}
-
-/* A slow scan bar travelling across the strip: the panel is "polling". */
-.stat-strip::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 90px;
-  pointer-events: none;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 9%, transparent), transparent);
-  animation: strip-scan 5.5s linear infinite;
-}
-
-@keyframes strip-scan {
-  0% {
-    transform: translateX(-120px);
-  }
-  60%,
-  100% {
-    transform: translateX(calc(100vw + 120px));
-  }
-}
-
-/* --- card hover: a 1px lift, the way a key cap moves -------------- */
+/* --- card hover: a 1px lift, the way a key cap moves ------------------ */
 
 .card-lift {
   transition:
@@ -677,10 +702,10 @@ body {
 .card-lift:hover {
   transform: translateY(-2px);
   border-color: var(--line-strong);
-  box-shadow: 0 6px 18px -10px color-mix(in srgb, var(--text) 45%, transparent);
+  box-shadow: 0 8px 24px -12px color-mix(in srgb, var(--text) 30%, transparent);
 }
 
-/* --- tabs: the active underline glides ---------------------------- */
+/* --- tabs: the active underline glides -------------------------------- */
 
 .server-tabs [role="tab"] {
   position: relative;
@@ -713,33 +738,7 @@ body {
   }
 }
 
-/* --- table rows: the hover marker slides in from the left --------- */
-
-.srv-table tbody tr {
-  position: relative;
-}
-
-.srv-table tbody tr td:first-child {
-  position: relative;
-}
-
-.srv-table tbody tr td:first-child::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--accent);
-  transform: scaleY(0);
-  transition: transform 180ms cubic-bezier(0.2, 0.9, 0.25, 1);
-}
-
-.srv-table tbody tr:hover td:first-child::before {
-  transform: scaleY(1);
-}
-
-/* --- assistant: a live "receiving" marker on the streaming bubble -- */
+/* --- assistant: a live "receiving" marker on the streaming bubble ----- */
 
 .msg-enter {
   animation: msg-in 320ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
@@ -819,7 +818,7 @@ body {
   }
 }
 
-/* --- error shake: a relay that failed to latch -------------------- */
+/* --- error shake: a form that refuses to submit ----------------------- */
 
 .shake {
   animation: shake 380ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
@@ -845,26 +844,7 @@ body {
   }
 }
 
-/* --- login: the brand dot beats like a heartbeat ------------------ */
-
-.brand-dot {
-  animation: brand-beat 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-@keyframes brand-beat {
-  0%,
-  86%,
-  100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  92% {
-    transform: scale(1.25);
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 0%, transparent);
-  }
-}
-
-/* --- notification: Mantine slides them, we tint them ------------- */
+/* --- notification: Mantine slides them, we tint them ------------------ */
 
 [data-mantine-notification] {
   animation: notif-in 300ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
@@ -881,7 +861,7 @@ body {
   }
 }
 
-/* --- console: new log lines fade up -------------------------------- */
+/* --- console: new log lines fade up ----------------------------------- */
 
 .log-line {
   animation: log-in 200ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
@@ -898,7 +878,7 @@ body {
   }
 }
 
-/* --- buttons that carry a running action pulse -------------------- */
+/* --- buttons that carry a running action pulse ------------------------ */
 
 .btn-busy {
   position: relative;
@@ -909,7 +889,7 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, #fff 26%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 18%, transparent), transparent);
   animation: busy-sweep 1.3s linear infinite;
 }
 
@@ -922,7 +902,7 @@ body {
   }
 }
 
-/* --- page chrome: the shell border lights up on load -------------- */
+/* --- page chrome: the shell border lights up on load ------------------ */
 
 /* A one-shot flash along the top edge when a route changes. */
 .route-flash {
@@ -932,7 +912,7 @@ body {
   right: 0;
   height: 1px;
   pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 45%, transparent), transparent);
   animation: route-flash 520ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
 }
 
@@ -947,23 +927,84 @@ body {
   }
 }
 
-/* --- reduced motion: strip the choreography, keep the state -------- */
+/* --- assistant: the "stage" indicator lamp in the header -------------- */
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
+.stage-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--dim);
+  animation: led-pulse 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
 
-  .status-dot.running::after,
-  .status-dot.starting::after,
-  .status-dot.stopping::after {
-    display: none;
+@keyframes led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--dim) 55%, transparent);
   }
+  50% {
+    opacity: 0.45;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--dim) 0%, transparent);
+  }
+}
+
+/* While the model is reasoning, its block carries a soft rule. */
+.thinking-block {
+  position: relative;
+}
+
+/* The plan block keeps a soft left rule so it reads as a checklist. */
+.plan-block {
+  position: relative;
+}
+
+/* A button that visibly compresses when pressed. */
+.btn-press {
+  transition: transform 110ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.btn-press:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+/* --- grid columns power up one after another --------------------------- */
+
+.stagger-cols > * {
+  animation: col-in 380ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.stagger-cols > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-cols > *:nth-child(2) { animation-delay: 70ms; }
+.stagger-cols > *:nth-child(3) { animation-delay: 140ms; }
+.stagger-cols > *:nth-child(4) { animation-delay: 210ms; }
+.stagger-cols > *:nth-child(5) { animation-delay: 280ms; }
+.stagger-cols > *:nth-child(n + 6) { animation-delay: 350ms; }
+
+@keyframes col-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- assistant: conversation list items -------------------------------- */
+
+.conv-item {
+  border-radius: 6px;
+  transition:
+    background-color 140ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 160ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+.conv-item:hover {
+  background: var(--panel-2) !important;
+  transform: translateX(2px);
 }
 
 /* --- staggered table rows (Mantine renders plain <tr>, so this is CSS) -- */
@@ -1008,108 +1049,21 @@ body {
   }
 }
 
-/* --- assistant: the "stage" indicator lamp in the header ----------- */
+/* --- reduced motion: strip the choreography, keep the state ------------ */
 
-.stage-led {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background: var(--accent);
-  animation: led-pulse 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-@keyframes led-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
-  50% {
-    opacity: 0.55;
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent);
+
+  .status-dot.running::after,
+  .status-dot.starting::after,
+  .status-dot.stopping::after {
+    display: none;
   }
-}
-
-/* The thinking block breathes while the model is still reasoning. */
-.thinking-block {
-  position: relative;
-  transition: border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.thinking-block::after {
-  content: "";
-  position: absolute;
-  left: -2px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--accent);
-  animation: thinking-rail 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-@keyframes thinking-rail {
-  0%,
-  100% {
-    transform: scaleY(0.25);
-    transform-origin: top;
-    opacity: 0.5;
-  }
-  50% {
-    transform: scaleY(1);
-    transform-origin: top;
-    opacity: 1;
-  }
-}
-
-/* The plan block keeps a soft left rule so it reads as a checklist. */
-.plan-block {
-  position: relative;
-}
-
-/* A button that visibly compresses when pressed. */
-.btn-press {
-  transition: transform 110ms cubic-bezier(0.2, 0.9, 0.25, 1);
-}
-
-.btn-press:active:not(:disabled) {
-  transform: scale(0.9);
-}
-
-/* --- grid columns power up one after another ------------------------ */
-
-.stagger-cols > * {
-  animation: col-in 380ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
-}
-
-.stagger-cols > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-cols > *:nth-child(2) { animation-delay: 70ms; }
-.stagger-cols > *:nth-child(3) { animation-delay: 140ms; }
-.stagger-cols > *:nth-child(4) { animation-delay: 210ms; }
-.stagger-cols > *:nth-child(5) { animation-delay: 280ms; }
-.stagger-cols > *:nth-child(n + 6) { animation-delay: 350ms; }
-
-@keyframes col-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* --- assistant: conversation list items ---------------------------- */
-
-.conv-item {
-  border-radius: 2px;
-  transition:
-    background-color 140ms cubic-bezier(0.4, 0, 0.2, 1),
-    transform 160ms cubic-bezier(0.2, 0.9, 0.25, 1);
-}
-
-.conv-item:hover {
-  background: var(--panel-2) !important;
-  transform: translateX(2px);
 }

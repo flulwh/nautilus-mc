@@ -215,7 +215,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
       ) : !shown.length ? (
         <ListEmpty label={search ? "没有匹配的文件" : "目录为空"} hint={search ? "换个关键词试试" : undefined} />
       ) : (
-      <ScrollArea h="calc(100vh - 330px)" type="auto">
+      <ScrollArea h="calc(100vh - 284px)" type="auto">
         <Table verticalSpacing={4} highlightOnHover>
           <Table.Thead>
             <Table.Tr>
@@ -230,7 +230,7 @@ export function FilesTab({ serverId }: { serverId: number }) {
               <Table.Tr key={entry.path} className="file-row" onClick={() => open(entry)}>
                 <Table.Td>
                   <Group gap={7} wrap="nowrap">
-                    {entry.is_dir ? <IconFolder size={15} color="#e8b13a" /> : <IconFile size={15} color="#5d8496" />}
+                    {entry.is_dir ? <IconFolder size={15} color="var(--warn)" /> : <IconFile size={15} color="var(--dim)" />}
                     <Text size="xs" className="mono">
                       {entry.name}
                     </Text>

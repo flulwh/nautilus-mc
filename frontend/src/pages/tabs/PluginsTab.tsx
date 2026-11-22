@@ -157,7 +157,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
               </Badge>
             </Group>
           </Group>
-          <ScrollArea h="calc(100vh - 340px)" type="hover" scrollbars="y" offsetScrollbars>
+          <ScrollArea h="calc(100vh - 294px)" type="hover" scrollbars="y" offsetScrollbars>
             <Table verticalSpacing={6}>
               <Table.Tbody>
                 {installed.data?.installed.map((p) => (
@@ -267,7 +267,7 @@ export function PluginsTab({ serverId }: { serverId: number }) {
             </Text>
           )}
 
-          <ScrollArea h="calc(100vh - 340px)" type="hover" scrollbars="y" offsetScrollbars>
+          <ScrollArea h="calc(100vh - 294px)" type="hover" scrollbars="y" offsetScrollbars>
             <Stack gap={6} pe={6}>
               {search.data?.results.map((item) => (
                 <Box

@@ -30,17 +30,17 @@ export function ConsoleTab({ serverId, canSend }: { serverId: number; canSend: b
       scrollback: 6000,
       fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
       theme: {
-        background: "#050a0e",
-        foreground: "#c7d7e4",
-        black: "#0b141c",
-        brightBlack: "#5a7286",
-        red: "#ef8093",
-        green: "#5ed6a4",
-        yellow: "#e8c26a",
-        blue: "#6aa9ff",
-        magenta: "#c79bf0",
-        cyan: "#4dd4e8",
-        white: "#dfe9f2",
+        background: "#0a0a0c",
+        foreground: "#c8cad0",
+        black: "#16161a",
+        brightBlack: "#5c5c64",
+        red: "#e5534b",
+        green: "#48c487",
+        yellow: "#d4a341",
+        blue: "#8a6fd6",
+        magenta: "#a691e4",
+        cyan: "#4dbfca",
+        white: "#d4d4d8",
       },
     });
     const fit = new FitAddon();
@@ -132,7 +132,7 @@ export function ConsoleTab({ serverId, canSend }: { serverId: number; canSend: b
               }}
               placeholder="输入指令，例如 list / say hello / whitelist add Steve"
               variant="unstyled"
-              styles={{ input: { color: "#cfe0ee", fontFamily: "var(--mantine-font-family-monospace)", fontSize: 12.5 } }}
+              styles={{ input: { color: "#c8cad0", fontFamily: "var(--mantine-font-family-monospace)", fontSize: 12.5 } }}
               leftSection={<Text size="xs" c="steelblue.4" className="mono">/</Text>}
               rightSection={
                 <ActionIcon variant="subtle" color="steelblue" onClick={send}>

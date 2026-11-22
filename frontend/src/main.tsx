@@ -29,7 +29,7 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <MantineProvider theme={nautilusTheme} defaultColorScheme="light">
+      <MantineProvider theme={nautilusTheme} defaultColorScheme="dark">
         <Notifications position="top-right" limit={3} />
         <BrowserRouter>
           <MotionProvider>

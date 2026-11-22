@@ -1,3 +1,4 @@
+import { useMantineColorScheme } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
@@ -22,6 +23,10 @@ export function MetricChart({
   min?: number;
 }) {
   const { ref: sizeRef, width } = useElementSize();
+  const { colorScheme } = useMantineColorScheme();
+  // Canvas can't read CSS variables, so mirror the Codex neutral tokens here.
+  const axisStroke = colorScheme === "dark" ? "#8e8e96" : "#6f6f78";
+  const gridStroke = colorScheme === "dark" ? "#27272b" : "#e5e5e8";
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<uPlot | null>(null);
   // Draw-in progress: the line grows from the left instead of appearing whole.
@@ -56,9 +61,9 @@ export function MetricChart({
       scales: { x: { time: true }, y: { range: (_u, _min, max) => [min, max <= 0 ? 10 : max * 1.15] } },
       axes: [
         {
-          stroke: "#6b747d",
-          grid: { stroke: "#242a31", width: 1 },
-          ticks: { stroke: "#242a31", width: 1 },
+          stroke: axisStroke,
+          grid: { stroke: gridStroke, width: 1 },
+          ticks: { stroke: gridStroke, width: 1 },
           font: "10px ui-monospace, Cascadia Mono, Consolas, monospace",
           // uPlot's default HH:MM:SS labels need ~52px; with 28px they were
           // silently truncated to "-50".
@@ -72,9 +77,9 @@ export function MetricChart({
             }),
         },
         {
-          stroke: "#6b747d",
-          grid: { stroke: "#242a31", width: 1 },
-          ticks: { stroke: "#242a31", width: 1 },
+          stroke: axisStroke,
+          grid: { stroke: gridStroke, width: 1 },
+          ticks: { stroke: gridStroke, width: 1 },
           font: "10px ui-monospace, Cascadia Mono, Consolas, monospace",
           size: 40,
         },
@@ -125,7 +130,7 @@ export function MetricChart({
     // ``data`` and ``series`` are intentionally excluded: they are applied by
     // the update effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, height, min, withSeconds]);
+  }, [width, height, min, withSeconds, colorScheme]);
 
   useEffect(() => {
     chartRef.current?.setData(data);

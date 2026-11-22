@@ -618,7 +618,12 @@ export function AssistantPage() {
   const info = STATUS[status];
 
   return (
-    <Group align="stretch" gap="xs" wrap="nowrap" style={{ height: "calc(100vh - 96px)" }}>
+    <Group
+      align="stretch"
+      gap="xs"
+      wrap="nowrap"
+      style={{ height: "calc(100vh - var(--app-shell-header-offset, 0px) - var(--mantine-spacing-md) * 2)" }}
+    >
       <Card className="glass" p={0} withBorder style={{ width: 208, display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <Group justify="space-between" px="xs" py={8} style={{ borderBottom: "1px solid var(--line)" }}>
           <Text fz={11} fw={600}>
@@ -652,7 +657,6 @@ export function AssistantPage() {
                 style={{
                   cursor: "pointer",
                   background: item.id === activeId ? "var(--panel-2, var(--panel))" : undefined,
-                  borderLeft: item.id === activeId ? "2px solid var(--accent, var(--dim))" : "2px solid transparent",
                 }}
                 onClick={() => void switchChat(item.id)}
               >
@@ -771,7 +775,7 @@ export function AssistantPage() {
               >
                 {bubble.role === "user" ? (
                   <Group justify="flex-end">
-                    <Card p="xs" radius="sm" bg="var(--panel)" withBorder style={{ maxWidth: "78%" }}>
+                    <Card p="xs" radius="md" bg="var(--panel-2)" withBorder style={{ maxWidth: "78%" }}>
                       <Text fz={12.5} style={{ whiteSpace: "pre-wrap" }}>
                         {bubble.text}
                       </Text>
@@ -788,7 +792,8 @@ export function AssistantPage() {
                         className="thinking-block"
                         style={{
                           padding: "var(--mantine-spacing-xs)",
-                          borderLeft: "2px solid var(--accent, var(--dim))",
+                          border: "1px solid var(--line)",
+                          borderRadius: 8,
                           background: "var(--panel-2, var(--panel))",
                           opacity: 0.92,
                         }}
@@ -843,7 +848,12 @@ export function AssistantPage() {
                     {bubble.plan && bubble.plan.steps.length > 0 && (
                       <motion.div
                         className="plan-block"
-                        style={{ padding: "var(--mantine-spacing-xs)", borderLeft: "2px solid var(--line)" }}
+                        style={{
+                          padding: "var(--mantine-spacing-xs)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 8,
+                          background: "var(--panel-2, var(--panel))",
+                        }}
                         layout
                       >
                         <Text fz={11} fw={600}>
@@ -905,9 +915,9 @@ export function AssistantPage() {
                           {tool.status === "running" ? (
                             <Loader size={11} />
                           ) : tool.status === "failed" ? (
-                            <IconX size={12} color="var(--red, #e03131)" />
+                            <IconX size={12} color="var(--bad)" />
                           ) : tool.status === "waiting" ? (
-                            <IconAlertTriangle size={12} color="var(--orange, #f08c00)" />
+                            <IconAlertTriangle size={12} color="var(--warn)" />
                           ) : (
                             <IconCheck size={12} color="var(--dim)" />
                           )}
@@ -1188,10 +1198,10 @@ export function AssistantPage() {
                           borderRadius: "50%",
                           background:
                             step.status === "failed"
-                              ? "var(--red, #e03131)"
+                              ? "var(--bad)"
                               : step.status === "running" || step.status === "waiting"
-                                ? "var(--orange, #f08c00)"
-                                : "var(--accent, var(--dim))",
+                                ? "var(--warn)"
+                                : "var(--accent-text)",
                           border: "2px solid var(--panel)",
                         }}
                       />

@@ -80,8 +80,8 @@ nautilus-mc/
 │   └── webui/dist/   # 前端构建产物（已提交）
 ├── frontend/src/
 │   ├── motion.tsx    # ★ 动效系统单一入口（EASE/variants/hooks）
-│   ├── styles.css    # 亮色工程蓝主题 + CSS 物理反馈动效
-│   ├── theme.ts      # Mantine 亮/暗双主题
+│   ├── styles.css    # Codex 中性配色令牌 + CSS 物理反馈动效
+│   ├── theme.ts      # Mantine 暗色优先双主题
 │   ├── api.ts perm.ts types.ts useSocket.ts
 │   ├── components/   # Confirm / AsyncState / ServerTable / MetricChart / StatusBadge
 │   └── pages/        # 10 个页面 + tabs/ 10 个详情页签
@@ -141,8 +141,12 @@ Windows 用 `taskkill /F /T` 连带结束进程树。
 React 19 + Vite 7 + Mantine 8 + TanStack Query + uPlot。
 Tab 级 lazy 分包，`motion` 单独拆 chunk（主包 443KB → 309KB）。
 
-主题：**亮色工程蓝工业控制台**（浅灰底、深墨字、单一强调色、方角、1px 边框、无阴影渐变）。
-终端与代码编辑器保留深色 —— 它们是内容面板不是界面 chrome，亮色反而刺眼。暗色可手动切换。
+主题：**Codex 桌面端风格**（默认暗色：#0d0d0f 底 + 分层面板 + 1px 边框；单色墨蓝
+`steelblue` 色阶充当 ink 强调色，主按钮 primaryShade {light:9, dark:1} 实现黑底白字/
+白底黑字的反转观感；圆角 6-12px；语义色仅用于状态）。无桌面顶栏——品牌行、导航、
+用户菜单与主题切换全部收进 240px 侧栏，激活项用 layoutId 滑动的圆角高亮。
+终端与代码编辑器在两种配色下都保持深色 —— 它们是内容面板不是界面 chrome。
+参考：github.com/Wangnov/awesome-codex-skins、github.com/xuhuanstudio/codex-styler。
 
 ---
 
@@ -206,7 +210,8 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 
 ### 5.1 明确的待办
 
-1. **截图更新**：`docs/screenshots/` 里的图还是旧暗色主题拍的，换成亮色工程蓝后没重拍。
+1. **截图更新**：`docs/screenshots/` 里的图还是旧工业蓝主题拍的，UI 已改为 Codex
+   桌面端风格（暗色优先、无顶栏侧栏布局），需要重拍。
 
 ### 5.2 架构文档里已经列出的演进路线
 

@@ -116,149 +116,159 @@ export function App() {
 
   return (
     <AppShell
-      navbar={{ width: 200, breakpoint: "sm", collapsed: { mobile: !navOpen } }}
-      header={{ height: 46 }}
+      navbar={{ width: 240, breakpoint: "sm", collapsed: { mobile: !navOpen } }}
+      header={{ height: { base: 46, sm: 0 } }}
       padding="md"
     >
+      {/* Desktop has no top bar — everything lives in the sidebar, like Codex.
+          The header only exists on mobile, to host the burger. */}
       <AppShell.Header
+        hiddenFrom="sm"
         style={{
           background: "var(--panel)",
           borderBottom: "1px solid var(--line)",
         }}
       >
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="sm">
-            <Burger opened={navOpen} onClick={() => setNavOpen((v) => !v)} hiddenFrom="sm" size="sm" />
-            <Group gap={8} align="center">
-              <div className="brand-dot" />
-              <Text fz={13} fw={600}>
-                Nautilus
-              </Text>
-              <Text fz={11} c="dimmed" className="mono">
-                v0.1.0
-              </Text>
-            </Group>
-          </Group>
-
-          <Group gap="xs">
-            <Tooltip label={colorScheme === "dark" ? "切换亮色" : "切换暗色"}>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="sm"
-                onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")}
-              >
-                {colorScheme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />}
-              </ActionIcon>
-            </Tooltip>
-            <Menu width={200} position="bottom-end">
-              <Menu.Target>
-                <Group gap={7} style={{ cursor: "pointer" }}>
-                  <Avatar size={24} radius={2} color="steelblue">
-                    {me.user.username.slice(0, 1).toUpperCase()}
-                  </Avatar>
-                  <Box visibleFrom="sm">
-                    <Text size="sm" lh={1.2}>
-                      {me.user.username}
-                    </Text>
-                    <Text size="11px" c="dimmed" lh={1.2}>
-                      {me.user.role}
-                    </Text>
-                  </Box>
-                </Group>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Label>{me.user.email}</Menu.Label>
-                <Menu.Item
-                  leftSection={<IconUserCircle size={15} />}
-                  onClick={() => navigate("/profile")}
-                >
-                  个人设置
-                </Menu.Item>
-                <Menu.Divider />
-                <Menu.Item color="red" leftSection={<IconLogout size={15} />} onClick={logout}>
-                  退出登录
-                </Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          </Group>
+        <Group h="100%" px="md" gap="sm">
+          <Burger opened={navOpen} onClick={() => setNavOpen((v) => !v)} size="sm" />
+          <div className="brand-dot" />
+          <Text fz={13} fw={600}>
+            Nautilus
+          </Text>
         </Group>
       </AppShell.Header>
 
-      <AppShell.Navbar className="shell-nav" p="sm">
+      <AppShell.Navbar className="shell-nav">
         <motion.div
           variants={staggerContainer(0.04)}
           initial="hidden"
           animate="show"
+          style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
         >
-        <Stack gap={2} mt={2} h="100%">
-          <motion.div variants={staggerItem} className="section-label">
-            运营
+          <motion.div className="side-brand" variants={staggerItem}>
+            <div className="brand-dot" />
+            Nautilus
+            <Text fz={10.5} c="dimmed" className="mono" fw={400}>
+              v0.1.0
+            </Text>
           </motion.div>
-          <motion.div variants={staggerItem}>
-            <NavLink to="/" icon={<IconDashboard size={14} />} label="总览" active={location.pathname === "/"} />
-          </motion.div>
-          <motion.div variants={staggerItem}>
-            <NavLink
-              to="/servers"
-              icon={<IconServer2 size={14} />}
-              label="服务器"
-              active={location.pathname.startsWith("/servers")}
-            />
-          </motion.div>
-          <motion.div variants={staggerItem}>
-            <NavLink
-              to="/assistant"
-              icon={<IconRobot size={14} />}
-              label="AI 助手"
-              active={location.pathname === "/assistant"}
-            />
-          </motion.div>
-          <motion.div variants={staggerItem} className="section-label">
-            治理
-          </motion.div>
-          {canAudit && (
-            <motion.div variants={staggerItem}>
-              <NavLink to="/audit" icon={<IconActivity size={14} />} label="审计日志" active={location.pathname === "/audit"} />
-            </motion.div>
-          )}
-          {isAdmin && (
-            <>
+
+          <Box px="sm" style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+            <Stack gap={2}>
+              <motion.div variants={staggerItem} className="section-label">
+                运营
+              </motion.div>
+              <motion.div variants={staggerItem}>
+                <NavLink to="/" icon={<IconDashboard size={14} />} label="总览" active={location.pathname === "/"} />
+              </motion.div>
               <motion.div variants={staggerItem}>
                 <NavLink
-                  to="/users"
-                  icon={<IconShieldLock size={14} />}
-                  label="用户与角色"
-                  active={location.pathname === "/users"}
+                  to="/servers"
+                  icon={<IconServer2 size={14} />}
+                  label="服务器"
+                  active={location.pathname.startsWith("/servers")}
                 />
               </motion.div>
               <motion.div variants={staggerItem}>
                 <NavLink
-                  to="/settings"
-                  icon={<IconAdjustments size={14} />}
-                  label="系统设置"
-                  active={location.pathname === "/settings"}
+                  to="/assistant"
+                  icon={<IconRobot size={14} />}
+                  label="AI 助手"
+                  active={location.pathname === "/assistant"}
                 />
               </motion.div>
-            </>
-          )}
-          <motion.div variants={staggerItem}>
-            <Box mt="auto" px={10} py={8}>
-              <Anchor
-                href="https://github.com/flulwh/nautilus-mc"
-                target="_blank"
-                underline="never"
-                fz={11}
-                c="dimmed"
-              >
-                源码仓库
-              </Anchor>
-              <Text fz={10.5} c="dimmed" mt={2} className="mono">
-                fastapi · casbin
-              </Text>
-            </Box>
+              <motion.div variants={staggerItem} className="section-label">
+                治理
+              </motion.div>
+              {canAudit && (
+                <motion.div variants={staggerItem}>
+                  <NavLink to="/audit" icon={<IconActivity size={14} />} label="审计日志" active={location.pathname === "/audit"} />
+                </motion.div>
+              )}
+              {isAdmin && (
+                <>
+                  <motion.div variants={staggerItem}>
+                    <NavLink
+                      to="/users"
+                      icon={<IconShieldLock size={14} />}
+                      label="用户与角色"
+                      active={location.pathname === "/users"}
+                    />
+                  </motion.div>
+                  <motion.div variants={staggerItem}>
+                    <NavLink
+                      to="/settings"
+                      icon={<IconAdjustments size={14} />}
+                      label="系统设置"
+                      active={location.pathname === "/settings"}
+                    />
+                  </motion.div>
+                </>
+              )}
+              <motion.div variants={staggerItem}>
+                <Anchor
+                  href="https://github.com/flulwh/nautilus-mc"
+                  target="_blank"
+                  underline="never"
+                  fz={10.5}
+                  c="dimmed"
+                  ml={10}
+                  mt={10}
+                  style={{ display: "block" }}
+                >
+                  源码仓库
+                </Anchor>
+              </motion.div>
+            </Stack>
+          </Box>
+
+          {/* Sidebar footer: user menu and theme switch — Codex puts the
+              account affordance at the bottom of the rail. */}
+          <motion.div
+            variants={staggerItem}
+            className="side-foot"
+            style={{ padding: "var(--mantine-spacing-sm)" }}
+          >
+            <Group justify="space-between" wrap="nowrap">
+              <Menu width={200} position="top-start">
+                <Menu.Target>
+                  <Group gap={7} style={{ cursor: "pointer", minWidth: 0 }}>
+                    <Avatar size={26} radius={6} color="steelblue">
+                      {me.user.username.slice(0, 1).toUpperCase()}
+                    </Avatar>
+                    <Box style={{ minWidth: 0 }}>
+                      <Text size="sm" lh={1.2} truncate>
+                        {me.user.username}
+                      </Text>
+                      <Text size="11px" c="dimmed" lh={1.2} truncate>
+                        {me.user.role}
+                      </Text>
+                    </Box>
+                  </Group>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>{me.user.email}</Menu.Label>
+                  <Menu.Item leftSection={<IconUserCircle size={15} />} onClick={() => navigate("/profile")}>
+                    个人设置
+                  </Menu.Item>
+                  <Menu.Divider />
+                  <Menu.Item color="red" leftSection={<IconLogout size={15} />} onClick={logout}>
+                    退出登录
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+              <Tooltip label={colorScheme === "dark" ? "切换亮色" : "切换暗色"}>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")}
+                >
+                  {colorScheme === "dark" ? <IconSun size={15} /> : <IconMoon size={15} />}
+                </ActionIcon>
+              </Tooltip>
+            </Group>
           </motion.div>
-        </Stack>
         </motion.div>
       </AppShell.Navbar>
 

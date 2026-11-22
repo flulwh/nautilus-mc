@@ -150,7 +150,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
               <IconRefresh size={12} />
             </ActionIcon>
           </Group>
-          <ScrollArea h="calc(100vh - 380px)" type="auto">
+          <ScrollArea h="calc(100vh - 334px)" type="auto">
             <Stack gap={2}>
               {files.data?.files.map((f) => (
                 <Box
@@ -180,7 +180,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
 
         <Card className="glass" p="sm" mt="sm" withBorder>
           <Group gap={6} mb={8}>
-            <IconHistory size={13} color="#6b8095" />
+            <IconHistory size={13} color="var(--dim)" />
             <Text className="stat-label">备份</Text>
             <Badge size="xs" variant="light" color="gray">
               {backups.data?.backups.length ?? 0}
@@ -266,7 +266,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
                     value={filter}
                     onChange={(e) => setFilter(e.currentTarget.value)}
                   />
-                  <ScrollArea h="calc(100vh - 400px)" type="auto">
+                  <ScrollArea h="calc(100vh - 354px)" type="auto">
                     <Stack gap={6} pr="sm">
                       {keys.map((k) => {
                         const type = doc.data?.types?.[k];
@@ -321,7 +321,7 @@ export function ConfigTab({ serverId }: { serverId: number }) {
               ) : (
                 <textarea
                   className="code-editor"
-                  style={{ minHeight: "calc(100vh - 380px)" }}
+                  style={{ minHeight: "calc(100vh - 334px)" }}
                   value={raw}
                   onChange={(e) => setRaw(e.currentTarget.value)}
                   spellCheck={false}

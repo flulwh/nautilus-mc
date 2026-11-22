@@ -73,7 +73,7 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "CPU %", color: "#7f9fbf", data: cpu }]} height={190} />
+            <MetricChart timestamps={ts} series={[{ label: "CPU %", color: "#8e8e96", data: cpu }]} height={190} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               等待采样数据（每 3 秒一次）
@@ -91,7 +91,7 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "RSS (MB)", color: "#b0a06a", data: mem }]} height={170} />
+            <MetricChart timestamps={ts} series={[{ label: "RSS (MB)", color: "#8a6fd6", data: mem }]} height={170} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               暂无数据
@@ -109,7 +109,7 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "Players", color: "#7fa87f", data: players }]} height={170} />
+            <MetricChart timestamps={ts} series={[{ label: "Players", color: "#48c487", data: players }]} height={170} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               暂无数据

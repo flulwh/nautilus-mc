@@ -152,7 +152,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
           <Card className="glass" p="md" withBorder>
             <Group justify="space-between" mb="sm">
               <Group gap={8}>
-                <IconUsers size={16} color="#5d8496" />
+                <IconUsers size={16} color="var(--dim)" />
                 <Title order={4}>在线玩家</Title>
                 <Badge size="sm" variant="light" color="teal">
                   {data?.online.length ?? 0}
@@ -220,7 +220,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
           <Card className="glass" p="md" withBorder>
             <Group justify="space-between" mb="xs">
               <Group gap={8}>
-                <IconShieldCheck size={16} color="#5d8496" />
+                <IconShieldCheck size={16} color="var(--dim)" />
                 <Title order={4}>白名单</Title>
                 <Badge size="sm" variant="light" color="steelblue">
                   {data?.whitelist.length ?? 0}
@@ -305,7 +305,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
           <Card className="glass" p="md" withBorder>
             <Group justify="space-between" mb="sm">
               <Group gap={8}>
-                <IconCrown size={16} color="#c9a227" />
+                <IconCrown size={16} color="var(--warn)" />
                 <Title order={4}>管理员</Title>
                 <Badge size="sm" variant="light" color="yellow">
                   {data?.ops.length ?? 0}
@@ -321,7 +321,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
                 {data.ops.map((entry) => (
                   <Group key={entry.uuid} justify="space-between">
                     <Group gap={8}>
-                      <IconCrown size={13} color="#c9a227" />
+                      <IconCrown size={13} color="var(--warn)" />
                       <Text size="sm" className="mono">
                         {entry.name}
                       </Text>
@@ -345,7 +345,7 @@ export function PlayersTab({ serverId }: { serverId: number }) {
           <Card className="glass" p="md" withBorder>
             <Group justify="space-between" mb="sm">
               <Group gap={8}>
-                <IconBan size={16} color="#e2566b" />
+                <IconBan size={16} color="var(--bad)" />
                 <Title order={4}>封禁名单</Title>
                 <Badge size="sm" variant="light" color="red">
                   {data?.bans.length ?? 0}
