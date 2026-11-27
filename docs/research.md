@@ -499,3 +499,27 @@ motion 独立 133KB（gzip 44KB）。不拆的话，登录页这一个静态页�
 
 **未做**：没有做视差滚动、粒子背景、Lottie、自定义光标 —— 那是展示型页面的语言，
 放在需要盯着看 30 秒的运维界面上只会分散注意力。
+
+---
+
+## 15. MC 运维扩展的上游选型核验（2026-11-28）
+
+`docs/mc-ops.md` 把 UPGRADE-PLAN 里 **W4 游戏运维纵深** 展开成 M1–M11 的模块级对照。
+它初稿是在检索工具不可用的环境下整理的，标注了大量「待核验」。本轮用已认证的 `gh api`
+把 58 个仓库的 ★ / 许可证 / 最近推送 / 归档状态全部跑了实数据（清单见 `docs/repos.txt`），
+结论不是"逐条打勾"，而是**改掉了 6 处事实错误、挡掉 3 处依赖风险**：
+
+| 类型 | 发现 | 处置 |
+|---|---|---|
+| 引用错误 | `itzg/mc-backup` 并不存在（404），真名 `itzg/docker-mc-backup` | 备份一致性语义的出处改名 |
+| **许可证踩线** | `Amulet-NBT` 是 PolyForm Shield + 非商用（`Amulet Team License 1.0.0`），**不是 MIT** | 从直接集成候选中移除，改 `twoolie/NBT`（MIT，含 RegionFile） |
+| 许可证误标 | `python-telegram-bot` 实为 **GPL-3.0**（原写 LGPL）、`Plan` 实为 **LGPL-3.0**、`gate` 实为 **Apache-2.0**、`shields` 实为 **Apache-2.0** | 结论不变或更硬，表述改正 |
+| 排除理由错 | `PaperMC/Waterfall` 是 MIT 且未归档（仍在推送） | 排除理由改为"上游停止新特性、仅安全维护"，不写许可证不符 |
+| 依赖僵化 | `nbtlib` 代码最后一次提交 2021-11（★163）；`discord-interactions-python` 停在 2024-04 | 前者降为备选、必须 pin；后者不引 —— Ed25519 验签用已有的 `cryptography` 自实现 |
+| 无许可证 | `mhammond/pywin32` 无 LICENSE 文件；`YouHaveTrouble/minecraft-optimization` 无许可证 | pywin32 改 ctypes 零依赖；后者只读思路、不复制正文 |
+
+顺带确认了两件"不用再纠结"的事：58 个仓库**没有一个归档**；`cole/aiosmtplib` 路径本来就是对的。
+
+**取舍**：没有把这份对照做成自动化的"许可证闸门"接进 CI —— 因为绝大多数候选是插件门控或仅语义参考，
+不产生依赖，真正会进 `pyproject.toml` 的只有 `twoolie/NBT`、`cole/aiosmtplib`、`docker-py`（可选 extra）
+三项，人工核验的成本远低于维护一套仓库元数据检查器。CI 里的 `pip-licenses` 已经把实际依赖看住了。

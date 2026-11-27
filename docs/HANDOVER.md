@@ -338,7 +338,9 @@ git add -A && git commit -m "..." && git push
 
 ## 9. 联系与上下文
 
-- 调研与决策全过程：`docs/research.md`（14 节，每节都列了上游 GitHub 项目对照与取舍理由）
+- 调研与决策全过程：`docs/research.md`（15 节，每节都列了上游 GitHub 项目对照与取舍理由）
+- 大规模升级方案（v0.1→v1.0，W0–W7 工作流与里程碑）：`docs/UPGRADE-PLAN.md`
+- MC 运维扩展的上游选型（M1–M11，已核验 ★/许可证/活跃度）：`docs/mc-ops.md`
 - 架构分层与关键流程：`docs/architecture.md`
 - 完整功能说明与截图：`README.md`
 - 项目工作区记忆：`C:\Users\lwh\Desktop\21\.workbuddy\memory\2026-11-22.md`

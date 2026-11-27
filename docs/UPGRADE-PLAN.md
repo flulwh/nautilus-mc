@@ -132,6 +132,11 @@
 
 ### W4 · 游戏运维纵深
 
+> 模块级上游对照（M1–M11：TPS / 备份 / 整合包 / 群组 / 玩家 / 世界 / 自动化 / 资源 / 告警 / 批量）
+> 见 **`docs/mc-ops.md`**，含 2026-11-28 实测的 ★/许可证/最近推送，以及 5 种集成方式的边界。
+> 该表已挡下 3 处许可证风险（Amulet-NBT 非商用、pywin32 无 LICENSE、两个停滞依赖），
+> 动手前先读它，别再按"待核验"的初稿引依赖。
+
 - TPS/MSPT 曲线与告警（TPS 已完成；告警：TPS<18 持续 60s、崩溃循环、磁盘水位 → webhook / AI 巡检）；原版/Fabric 走 spark；mcstatus SLP 外部探活区分「进程活着」与「服务可连」。
 - 备份一致性三段式 `save-off → save-all flush → 归档 → finally save-on`；增量/加密/异地交 **restic**（BSD-2，按 JRE 模式托管二进制 + SHA-256）；定期恢复演练（level.dat 校验）入审计。
 - `.mrpack` 导入；CurseForge zip（API Key 开关）；**导入现有服务器目录**；版本升级向导（兼容性检查 → 备份 → 升级 → 回滚）。
