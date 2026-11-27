@@ -191,7 +191,7 @@ def _platform() -> tuple[str, str]:
 
 async def _mirror_link(c: httpx.AsyncClient, major: int, os_name: str, arch: str, name: str) -> str | None:
     """Tsinghua mirrors Adoptium's release tree with identical file names."""
-    url = f"{TUNA}/{major}/jre/{arch}/{os_name}/{name}"
+    url = f"{TUNA}/{major}/jdk/{arch}/{os_name}/{name}"
     try:
         r = await c.head(url)
     except (httpx.HTTPError, OSError):
@@ -201,7 +201,7 @@ async def _mirror_link(c: httpx.AsyncClient, major: int, os_name: str, arch: str
 
 async def _asset(major: int, os_name: str, arch: str) -> dict:
     url = f"{ADOPTIUM}/assets/latest/{major}/hotspot"
-    params = {"os": os_name, "architecture": arch, "image_type": "jre", "vendor": "eclipse"}
+    params = {"os": os_name, "architecture": arch, "image_type": "jdk", "vendor": "eclipse"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0), follow_redirects=True, headers={"User-Agent": UA}) as c:
         r = await c.get(url, params=params)
         if r.status_code == 404:
@@ -265,12 +265,15 @@ async def download(major: int, progress=None) -> JavaRuntime:
     root = managed_root()
     version = re.sub(r"[^0-9A-Za-z._+-]", "", asset["version"] or str(major)) or str(major)
     final = root / f"{major}-{version}"
+    exe = "jcmd.exe" if os.name == "nt" else "jcmd"
     if final.exists():
         found = _find_java(final)
-        if found:
+        if found and (found.parent / exe).is_file():
             info = await _probe(str(found))
             if info:
                 return info
+        # A pre-JFR build installed the JRE here: same version, no jcmd.
+        shutil.rmtree(final, ignore_errors=True)
 
     tmp = root / f".download-{major}-{os.getpid()}"
     tmp.mkdir(parents=True, exist_ok=True)
@@ -298,7 +301,7 @@ async def download(major: int, progress=None) -> JavaRuntime:
                                 digest.update(chunk)
                                 done += len(chunk)
                                 if progress:
-                                    res = progress(done, total, f"下载 JRE {major}")
+                                    res = progress(done, total, f"下载 JDK {major}")
                                     if asyncio.iscoroutine(res):
                                         await res
                     break
@@ -307,11 +310,11 @@ async def download(major: int, progress=None) -> JavaRuntime:
                     if attempt + 1 < len(urls):
                         log.warning("java download from %s failed (%s), trying fallback", url.split("/")[2], exc)
             else:
-                raise JavaError(f"JRE 下载失败：{last_exc}")
+                raise JavaError(f"JDK 下载失败：{last_exc}")
         if asset["sha256"] and digest.hexdigest().lower() != asset["sha256"]:
-            raise JavaError("JRE 校验失败（SHA-256 不匹配）")
+            raise JavaError("JDK 校验失败（SHA-256 不匹配）")
         if not archive.exists() or archive.stat().st_size == 0:
-            raise JavaError("JRE 下载为空")
+            raise JavaError("JDK 下载为空")
         if progress:
             res = progress(done, done, "解压")
             if asyncio.iscoroutine(res):
@@ -325,7 +328,7 @@ async def download(major: int, progress=None) -> JavaRuntime:
 
     found = _find_java(final)
     if found is None:
-        raise JavaError("JRE 解压后找不到 java 可执行文件")
+        raise JavaError("JDK 解压后找不到 java 可执行文件")
     if os.name != "nt":
         try:
             found.chmod(0o755)
@@ -334,7 +337,7 @@ async def download(major: int, progress=None) -> JavaRuntime:
     invalidate()
     info = await _probe(str(found))
     if info is None:
-        raise JavaError("下载的 JRE 无法执行")
+        raise JavaError("下载的 JDK 无法执行")
     return info
 
 

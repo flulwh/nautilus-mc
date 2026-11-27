@@ -61,6 +61,27 @@ export interface MetricPoint {
   players: number;
 }
 
+export interface JfrRecording {
+  name: string;
+  running: boolean;
+  detail: string;
+}
+
+export interface JfrDump {
+  filename: string;
+  size: number;
+  modified: number;
+}
+
+export interface JfrStatus {
+  available: boolean;
+  reason: string;
+  pid: number | null;
+  recordings: JfrRecording[];
+  dumps: JfrDump[];
+  keep: number;
+}
+
 export interface TpsPoint {
   ts: number;
   tps1: number | null;

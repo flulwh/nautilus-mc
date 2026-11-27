@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     stop_grace_seconds: int = 30
     #: How many whole-server archives to keep per server (oldest pruned first).
     backup_keep: int = 10
+    #: How many JFR recording files to keep per server (oldest pruned first).
+    jfr_keep: int = 5
     #: IANA name used to interpret scheduled task cron expressions.
     timezone: str = "Asia/Shanghai"
     log_level: str = "info"

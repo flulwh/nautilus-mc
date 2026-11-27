@@ -223,7 +223,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 | P6.2 | 备份调度：增量 zip + 异地上传（S3/WebDAV），保留策略 |
 | P6.3 | OIDC 单点登录（Authlib），企业用户目录对接 |
 | P6.4 | 插件市场聚合器：Modrinth + Hangar + CurseForge 统一检索与冲突检测 |
-| P6.5 | 性能剖析：**TPS/MSPT 曲线已上线**（2026-11-27：RCON 每 10 秒采样 Paper `/tps`，REST `/servers/{id}/tps`，WS `tps_history`/`tps` 帧，监控页曲线 + Tick 健康徽章）；JFR 接入仍待做 |
+| P6.5 | 性能剖析：**已完整上线**。TPS/MSPT 曲线（2026-11-27：RCON 每 10 秒采样 Paper `/tps`，REST `/servers/{id}/tps`，WS `tps_history`/`tps` 帧，监控页曲线 + Tick 健康徽章）；JFR 接入（2026-11-27：`nautilus/servers/jfr.py` 经 `jcmd` 直控 JVM，REST `/servers/{id}/jfr` 状态 + start/dump/stop/delete，剖析文件写 `logs/nautilus-jfr-*.jfr`、保留最近 `jfr_keep`=5 份，监控页「性能剖析」卡片：定时录制 / 运行中快照 / 下载 / 删除。前提：服务器选用 JDK，系统页可在线下载） |
 
 ### 5.3 明确"没做"的及原因
 
@@ -267,6 +267,8 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 | 21 | 响应体只能读一次 | `res.json()` 后再 `res.text()` 会抛 "body used already"，掩盖真实错误 |
 | 22 | Paper 1.20.6+ 的 `/tps` 输出第三窗口是 **15m**（旧版 10m），且每行带 `§` 颜色码 | 解析先剥颜色码，正则同时接受 `10m/15m` |
 | 23 | Adoptium API 的下载链接重定向到 GitHub Release，国内基本不可用 | 优先试清华 `mirrors.tuna.tsinghua.edu.cn/Adoptium` 镜像（文件名与 API package name 一致），失败回退源站，SHA-256 仍以 API 为准 |
+| 24 | `jcmd JFR.dump` 在没有进行中录制时**退出码 0** 且不写任何文件（"No recordings to dump from"） | 快照前必须先 `JFR.check` 确认有 running 录制并把 `name=` 传给它，否则接口会"成功"地返回一个不存在的文件 |
+| 25 | `JFR.check` 输出格式跨 JDK 版本不同（21：`Recording 1: name=x duration=30s (running)`；旧版 `name: (running)`），且 `jcmd` 只随 JDK 发布 | 解析正则兼容两种形态；面板托管运行时从 JRE 改为下载 JDK（旧 JRE 目录自动重建） |
 
 ---
 

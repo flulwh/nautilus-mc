@@ -1,11 +1,19 @@
-import { Badge, Card, Grid, Group, SegmentedControl, Stack, Text } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
+import { ActionIcon, Badge, Button, Card, Grid, Group, SegmentedControl, Select, Stack, Text, Tooltip } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { IconDownload, IconPlayerPause, IconPlayerRecord, IconTrash } from "@tabler/icons-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { api } from "../../api";
+import { api, ApiError } from "../../api";
 import { MetricChart } from "../../components/MetricChart";
-import type { MetricPoint, TpsPoint } from "../../types";
+import type { JfrStatus, MetricPoint, TpsPoint } from "../../types";
 import { useSocket } from "../../useSocket";
+
+function humanSize(n: number): string {
+  if (n > 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n > 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${n} B`;
+}
 
 function healthOf(p: TpsPoint | null): { label: string; color: string } | null {
   if (!p || p.tps1 == null) return null;
@@ -80,6 +88,53 @@ export function MetricsTab({ serverId }: { serverId: number }) {
   const tpsTs = visibleTps.map((p) => p.ts);
   const latestTps = tpsPoints.length ? tpsPoints[tpsPoints.length - 1] : null;
   const health = healthOf(latestTps);
+
+  // ------------------------------------------------------------- JFR 剖析
+  const qc = useQueryClient();
+  const [jfrDuration, setJfrDuration] = useState("60");
+  const [jfrProfile, setJfrProfile] = useState("profile");
+
+  const jfr = useQuery<JfrStatus>({
+    queryKey: ["jfr", serverId],
+    queryFn: () => api.get(`/servers/${serverId}/jfr`),
+    refetchInterval: 10000,
+  });
+
+  const invalidateJfr = () => qc.invalidateQueries({ queryKey: ["jfr", serverId] });
+  const jfrRunning = (jfr.data?.recordings ?? []).some((r) => r.running);
+  const jfrFailed = (e: unknown) =>
+    notifications.show({ color: "red", title: "JFR 操作失败", message: (e as ApiError).detail });
+
+  const jfrStart = useMutation({
+    mutationFn: () =>
+      api.post(`/servers/${serverId}/jfr/start`, { duration_s: Number(jfrDuration), profile: jfrProfile }),
+    onSuccess: () => {
+      notifications.show({ color: "teal", title: "开始录制", message: `JFR 将录制 ${jfrDuration} 秒，结束后自动写入 logs/` });
+      invalidateJfr();
+    },
+    onError: jfrFailed,
+  });
+
+  const jfrDump = useMutation({
+    mutationFn: () => api.post(`/servers/${serverId}/jfr/dump`),
+    onSuccess: () => {
+      notifications.show({ color: "teal", message: "已快照当前事件缓冲" });
+      invalidateJfr();
+    },
+    onError: jfrFailed,
+  });
+
+  const jfrStop = useMutation({
+    mutationFn: (name: string) => api.post(`/servers/${serverId}/jfr/stop`, { name }),
+    onSuccess: invalidateJfr,
+    onError: jfrFailed,
+  });
+
+  const jfrDel = useMutation({
+    mutationFn: (filename: string) => api.del(`/servers/${serverId}/jfr?filename=${encodeURIComponent(filename)}`),
+    onSuccess: invalidateJfr,
+    onError: jfrFailed,
+  });
 
   return (
     <Grid gutter="md">
@@ -186,6 +241,131 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             <Text size="xs" c="dimmed" py="lg">
               暂无数据
             </Text>
+          )}
+        </Card>
+      </Grid.Col>
+
+      <Grid.Col span={12}>
+        <Card className="glass" p="md" withBorder>
+          <Group justify="space-between" mb="xs" wrap="nowrap" align="flex-start">
+            <Stack gap={2}>
+              <Text className="stat-label">性能剖析（JFR）</Text>
+              <Text size="10.5px" c="dimmed">
+                通过 jcmd 直控 JVM，需 JDK 运行环境；文件写入 logs/，保留最近 {jfr.data?.keep ?? 5} 份。
+              </Text>
+            </Stack>
+            {jfr.data?.available ? (
+              <Group gap={6} wrap="nowrap">
+                <Select
+                  size="xs"
+                  w={86}
+                  data={[
+                    { value: "30", label: "30 秒" },
+                    { value: "60", label: "60 秒" },
+                    { value: "300", label: "5 分钟" },
+                    { value: "600", label: "10 分钟" },
+                  ]}
+                  value={jfrDuration}
+                  onChange={(v) => v && setJfrDuration(v)}
+                  allowDeselect={false}
+                />
+                <Select
+                  size="xs"
+                  w={100}
+                  data={[
+                    { value: "profile", label: "profile" },
+                    { value: "default", label: "default" },
+                  ]}
+                  value={jfrProfile}
+                  onChange={(v) => v && setJfrProfile(v)}
+                  allowDeselect={false}
+                />
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="red"
+                  leftSection={<IconPlayerRecord size={13} />}
+                  loading={jfrStart.isPending}
+                  onClick={() => jfrStart.mutate()}
+                >
+                  录制
+                </Button>
+                <Tooltip label={jfrRunning ? "立刻把进行中的录制缓冲快照成一个剖析文件" : "先点「录制」，有进行中的录制后才能快照"}>
+                  <Button
+                    size="xs"
+                    variant="default"
+                    disabled={!jfrRunning}
+                    loading={jfrDump.isPending}
+                    onClick={() => jfrDump.mutate()}
+                  >
+                    快照
+                  </Button>
+                </Tooltip>
+              </Group>
+            ) : (
+              <Text size="xs" c="dimmed">{jfr.data?.reason ?? "检查中…"}</Text>
+            )}
+          </Group>
+          {(jfr.data?.recordings.length ?? 0) > 0 && (
+            <Stack gap={2} mb="xs">
+              {jfr.data?.recordings.map((rec) => (
+                <Group key={rec.name} gap={8} wrap="nowrap">
+                  <Badge size="xs" variant="light" color={rec.running ? "red" : "gray"}>
+                    {rec.running ? "录制中" : "已结束"}
+                  </Badge>
+                  <Text size="xs" className="mono" truncate>
+                    {rec.name}
+                  </Text>
+                  <Text size="10px" c="dimmed" truncate style={{ flex: 1 }}>
+                    {rec.detail}
+                  </Text>
+                  {rec.running && (
+                    <Tooltip label="停止录制">
+                      <ActionIcon size="sm" variant="subtle" color="gray" onClick={() => jfrStop.mutate(rec.name)}>
+                        <IconPlayerPause size={13} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </Group>
+              ))}
+            </Stack>
+          )}
+          {(jfr.data?.dumps.length ?? 0) > 0 ? (
+            <Stack gap={2}>
+              {jfr.data?.dumps.map((d) => (
+                <Group key={d.filename} gap={8} wrap="nowrap">
+                  <Text size="xs" className="mono" truncate style={{ flex: 1 }}>
+                    {d.filename}
+                  </Text>
+                  <Text size="10px" c="dimmed" className="tabular">
+                    {humanSize(d.size)}
+                  </Text>
+                  <Text size="10px" c="dimmed" className="tabular">
+                    {new Date(d.modified * 1000).toLocaleString("zh-CN", {
+                      hour12: false,
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Text>
+                  <Tooltip label="下载后用 JDK Mission Control 打开">
+                    <a href={`/api/servers/${serverId}/files/download?path=${encodeURIComponent(`logs/${d.filename}`)}`} download={d.filename}>
+                      <ActionIcon size="sm" variant="subtle" color="steelblue">
+                        <IconDownload size={13} />
+                      </ActionIcon>
+                    </a>
+                  </Tooltip>
+                  <Tooltip label="删除">
+                    <ActionIcon size="sm" variant="subtle" color="red" onClick={() => jfrDel.mutate(d.filename)}>
+                      <IconTrash size={13} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+              ))}
+            </Stack>
+          ) : (
+            <Text size="xs" c="dimmed">还没有剖析文件。先点「录制」开始一段定时录制；卡顿若发生在录制期间，点「快照」导出当前缓冲。</Text>
           )}
         </Card>
       </Grid.Col>

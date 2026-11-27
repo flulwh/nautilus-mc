@@ -256,7 +256,7 @@ export function SystemPage() {
                   loading={downloadJava.isPending && downloadJava.variables === major}
                   onClick={() => downloadJava.mutate(major)}
                 >
-                  下载 JRE {major}
+                  下载 JDK {major}
                 </Button>
               ))}
             </Group>
@@ -266,7 +266,7 @@ export function SystemPage() {
           </Text>
           {progress && (
             <Text fz={11} className="mono" mb={6} style={{ color: progress.pct < 0 ? "var(--bad)" : "var(--dim)" }}>
-              JRE {progress.major} · {progress.pct < 0 ? progress.stage : `${progress.pct}% ${progress.stage}`}
+              JDK {progress.major} · {progress.pct < 0 ? progress.stage : `${progress.pct}% ${progress.stage}`}
             </Text>
           )}
           <Table verticalSpacing="xs">

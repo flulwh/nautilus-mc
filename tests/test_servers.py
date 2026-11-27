@@ -186,6 +186,45 @@ def test_tps_parser():
     assert parse_tps("Unknown or incomplete command") is None
 
 
+def test_jfr_check_parser_and_paths(tmp_path):
+    import os as _os
+
+    from nautilus.models import Server
+    from nautilus.servers import jfr
+
+    text = (
+        "14132:\n"
+        "Recording 1: name=nautilus-20261127-222101 duration=30s (running)\n"
+        "Recording 2: name=nautilus-old (stopped)\n"
+        "legacy-1: (running) 5.2 s\n"
+    )
+    recs = jfr.parse_check(text)
+    assert [r["name"] for r in recs] == ["nautilus-20261127-222101", "nautilus-old", "legacy-1"]
+    assert recs[0]["running"] and recs[0]["detail"] == "duration=30s"
+    assert not recs[1]["running"]
+    assert recs[2]["running"]
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    exe = "jcmd.exe" if _os.name == "nt" else "jcmd"
+    (bin_dir / exe).write_text("stub")
+    server = Server(name="x", kind="paper", java=str(bin_dir / ("java.exe" if _os.name == "nt" else "java")))
+    assert jfr.jcmd_path(server) == str(bin_dir / exe)
+
+
+def test_jfr_filename_guard(tmp_path):
+    from nautilus.models import Server
+    from nautilus.servers import jfr
+
+    server = Server(name="x", kind="paper")
+    for bad in ("../../etc/passwd", "logs/evil.jfr", "other.jfr", "nautilus-jfr-a.bin"):
+        try:
+            jfr._target_file(server, bad)
+        except jfr.JfrError:
+            continue
+        raise AssertionError(f"accepted {bad!r}")
+
+
 def test_command_builder():
     from nautilus.models import Server
     from nautilus.servers.manager import manager

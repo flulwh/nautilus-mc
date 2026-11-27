@@ -20,6 +20,7 @@ from ..models import Server, User
 from ..resources import files as file_service
 from ..resources.plugins import content_dir
 from ..servers import provision
+from ..servers import jfr as jfr_service
 from ..servers.manager import ManagerError, free_port, manager, port_in_use
 from ..settings import settings
 
@@ -420,6 +421,148 @@ async def tps(server_id: int, session: SessionDep, limit: int = Query(240, ge=10
     await _get(session, server_id)
     rt = manager.get(server_id)
     return {"points": list(rt.tps)[-limit:], "interval": settings.tps_interval, "state": rt.state}
+
+
+# ----------------------------------------------------------------- profiling
+
+
+class JfrStartIn(BaseModel):
+    duration_s: int = Field(default=60, ge=5, le=3600)
+    profile: str = "profile"
+
+
+class JfrStopIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+async def _jfr_target(session, server_id: int) -> tuple[Server, int]:
+    server = await _get(session, server_id)
+    rt = manager.get(server_id)
+    if not rt.alive or rt.state != "running" or rt.proc is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "服务器未运行，无法控制 JFR")
+    return server, rt.proc.pid
+
+
+@router.get("/{server_id}/jfr", dependencies=[Depends(require("server", "read"))])
+async def jfr_status(server_id: int, session: SessionDep) -> dict:
+    server = await _get(session, server_id)
+    rt = manager.get(server_id)
+    pid = rt.proc.pid if rt.alive and rt.state == "running" and rt.proc else None
+    reason = ""
+    recordings: list[dict] = []
+    if pid is None:
+        reason = "服务器未运行"
+    elif not jfr_service.jcmd_path(server):
+        reason = "当前 Java 运行环境没有 jcmd：到系统页下载 JDK 并在服务器设置里选用它"
+    else:
+        try:
+            recordings = await jfr_service.check(server, pid)
+        except jfr_service.JfrError as exc:
+            reason = str(exc)[:300]
+    return {
+        "available": pid is not None and not reason,
+        "reason": reason,
+        "pid": pid,
+        "recordings": recordings,
+        "dumps": jfr_service.list_dumps(server),
+        "keep": settings.jfr_keep,
+    }
+
+
+@router.post("/{server_id}/jfr/start")
+async def jfr_start(
+    server_id: int,
+    payload: JfrStartIn,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("server", "control")),
+) -> dict:
+    server, pid = await _jfr_target(session, server_id)
+    try:
+        result = await jfr_service.start(server, pid, payload.duration_s, payload.profile)
+    except jfr_service.JfrError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)[:300]) from exc
+    await record(
+        session,
+        action="server.jfr",
+        actor=actor,
+        target=server.name,
+        detail={"op": "start", "recording": result["name"], "duration_s": payload.duration_s, "profile": payload.profile},
+        ip=client_ip(request),
+    )
+    return result
+
+
+@router.post("/{server_id}/jfr/dump")
+async def jfr_dump(
+    server_id: int,
+    request: Request,
+    session: SessionDep,
+    name: str = Query(default="", max_length=80),
+    actor: User = Depends(require("server", "control")),
+) -> dict:
+    server, pid = await _jfr_target(session, server_id)
+    try:
+        result = await jfr_service.dump(server, pid, name)
+    except jfr_service.JfrError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)[:300]) from exc
+    await record(
+        session,
+        action="server.jfr",
+        actor=actor,
+        target=server.name,
+        detail={"op": "dump", "filename": result["filename"]},
+        ip=client_ip(request),
+    )
+    return result
+
+
+@router.post("/{server_id}/jfr/stop")
+async def jfr_stop(
+    server_id: int,
+    payload: JfrStopIn,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("server", "control")),
+) -> dict:
+    server, pid = await _jfr_target(session, server_id)
+    try:
+        result = await jfr_service.stop(server, pid, payload.name)
+    except jfr_service.JfrError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)[:300]) from exc
+    await record(
+        session,
+        action="server.jfr",
+        actor=actor,
+        target=server.name,
+        detail={"op": "stop", "recording": payload.name},
+        ip=client_ip(request),
+    )
+    return result
+
+
+@router.delete("/{server_id}/jfr")
+async def jfr_delete(
+    server_id: int,
+    request: Request,
+    session: SessionDep,
+    filename: str = Query(min_length=1, max_length=120),
+    actor: User = Depends(require("server", "delete")),
+) -> dict:
+    server = await _get(session, server_id)
+    try:
+        jfr_service.remove_dump(server, filename)
+    except jfr_service.JfrError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await record(
+        session,
+        action="server.jfr",
+        actor=actor,
+        target=server.name,
+        detail={"op": "delete", "filename": filename},
+        ip=client_ip(request),
+    )
+    return {"deleted": filename}
 
 
 # Player administration lives in ``api/players.py`` (whitelist / ops / bans).

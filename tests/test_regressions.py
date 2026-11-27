@@ -115,6 +115,19 @@ async def test_unknown_server_logs_are_404(admin):
     assert (await admin.get("/api/servers/999999/logs")).status_code == 404
     assert (await admin.get("/api/servers/999999/metrics")).status_code == 404
     assert (await admin.get("/api/servers/999999/tps")).status_code == 404
+    assert (await admin.get("/api/servers/999999/jfr")).status_code == 404
+
+
+async def test_jfr_requires_running_server(admin):
+    server = await _make_server(admin, "jfr-idle")
+    r = await admin.get(f"/api/servers/{server['id']}/jfr")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is False
+    assert body["reason"] == "服务器未运行"
+    r = await admin.post(f"/api/servers/{server['id']}/jfr/start", json={"duration_s": 60, "profile": "profile"})
+    assert r.status_code == 409
+    await admin.delete(f"/api/servers/{server['id']}", params={"purge": True})
 
 
 async def test_tps_samples_only_paper_with_rcon(admin, monkeypatch):
