@@ -1,0 +1,13 @@
+# Template for auto-generated release notes (softprops/action-gh-release).
+changelog:
+  categories:
+    - title: ✨ 新功能
+      labels: [kind/feature]
+    - title: 🐛 修复
+      labels: [kind/fix]
+    - title: ⚡ 性能
+      labels: [kind/performance]
+    - title: 🔒 安全
+      labels: [kind/security]
+    - title: 其他改动
+      labels: ["*"]

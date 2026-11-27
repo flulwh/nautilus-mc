@@ -21,6 +21,7 @@ import { useState } from "react";
 import { api, ApiError } from "../api";
 import { SkeletonRows } from "../components/AsyncState";
 import { useConfirm } from "../components/Confirm";
+import { ROLES } from "../generated/contract";
 import type { Me, UserRow } from "../types";
 
 const ROLE_HINT: Record<string, string> = {
@@ -138,7 +139,7 @@ export function UsersPage() {
                     <Select
                       size="xs"
                       value={u.role}
-                      data={Object.keys(ROLE_HINT).map((r) => ({ value: r, label: r }))}
+                      data={ROLES.map((r) => ({ value: r, label: r }))}
                       onChange={(role) => role && patch.mutate({ id: u.id, body: { role } })}
                       disabled={self}
                       allowDeselect={false}
@@ -225,7 +226,7 @@ export function UsersPage() {
           />
           <Select
             label="角色"
-            data={Object.keys(ROLE_HINT).map((r) => ({ value: r, label: r }))}
+            data={ROLES.map((r) => ({ value: r, label: r }))}
             value={form.role}
             onChange={(v) => setForm((f) => ({ ...f, role: v || "viewer" }))}
             allowDeselect={false}

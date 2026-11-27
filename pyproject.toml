@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nautilus-mc"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Nautilus - a high-performance, extensible web panel for Minecraft servers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -69,6 +69,9 @@ Homepage = "https://github.com/flulwh/nautilus-mc"
 
 [tool.setuptools.packages.find]
 include = ["nautilus*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "nautilus._version.__version__" }
 
 [tool.setuptools.package-data]
 "nautilus.webui" = ["dist/**/*", "dist/*"]

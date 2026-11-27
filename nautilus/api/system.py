@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from .._version import __version__, git_commit
 from .. import notify
 from ..audit import record
 from ..authz import ACTIONS, OBJECTS, ROLES, authz
@@ -72,7 +73,8 @@ async def list_audit(
 async def meta() -> dict:
     return {
         "name": "Nautilus",
-        "version": "0.1.0",
+        "version": __version__,
+        "commit": git_commit(),
         "tagline": "Minecraft 服务端管理面板",
         "roles": ROLES,
         "objects": OBJECTS,
@@ -95,6 +97,8 @@ async def system_info(session: SessionDep, _=Depends(require("system", "read")))
     # ``java -version`` is a subprocess: keep it off the event loop.
     java = await asyncio.to_thread(java_version)
     return {
+        "version": __version__,
+        "commit": git_commit(),
         "python": sys.version.split()[0],
         "platform": f"{platform.system()} {platform.release()}",
         "java": java,

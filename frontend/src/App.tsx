@@ -43,6 +43,7 @@ import { SystemPage } from "./pages/System";
 import { UsersPage } from "./pages/Users";
 import { hasPerm, isAdmin as isAdminUser } from "./perm";
 import type { Me } from "./types";
+import { useVersion } from "./useVersion";
 
 function NavLink({ to, icon, label, active }: { to: string; icon: React.ReactNode; label: string; active: boolean }) {
   return (
@@ -67,6 +68,7 @@ export function App() {
   const queryClient = useQueryClient();
   const [navOpen, setNavOpen] = useState(false);
   const { colorScheme, setColorScheme } = useMantineColorScheme();
+  const version = useVersion();
 
   const meQuery = useQuery<Me>({
     queryKey: ["me"],
@@ -149,7 +151,7 @@ export function App() {
             <div className="brand-dot" />
             Nautilus
             <Text fz={10.5} c="dimmed" className="mono" fw={400}>
-              v0.1.0
+              {version || " "}
             </Text>
           </motion.div>
 

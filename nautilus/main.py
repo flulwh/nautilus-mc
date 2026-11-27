@@ -18,6 +18,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
+from ._version import __version__
 from .api import ai, backups, configs, files, players, plugins, servers, system, tasks, tokens, worlds
 from .auth import router as auth_router
 from .auth.backend import auth_backend, fastapi_users, get_user_manager  # noqa: F401  (re-export)
@@ -75,7 +76,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Nautilus",
-        version="0.1.0",
+        version=__version__,
         description="High-performance, extensible Minecraft server panel",
         lifespan=lifespan,
         docs_url="/api/docs",

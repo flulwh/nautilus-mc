@@ -214,7 +214,8 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 
 > **大规模升级（v0.1→v1.0）已定稿为 `docs/UPGRADE-PLAN.md`**：8 条工作流 W0–W7、里程碑
 > v0.2/v0.3/v1.0、结构性天花板的代码证据与「明确不做」清单都在那里。当前进度：
-> **W1-Step1（面板重启零停机）已完成**，见 §3.2；下一步是 W0（CI/契约/发布地基）与 W2（状态持久化）。
+> **W1-Step1（面板重启零停机）与 W0（CI/契约/发布地基）已完成**，见 §3.2 与 UPGRADE-PLAN「进度」。
+> 下一步是 W2（状态持久化 Step1/2）与 W1-Step2（`nautilus-agent` 守护进程）。
 
 ### 5.1 明确的待办
 
@@ -292,6 +293,8 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 6. **时间一律 `models.iso_utc()`**，别直接 `datetime.isoformat()`。
 7. **删掉临时脚本**。上一轮留过 `tools/stub_openai.py`（OpenAI 兼容桩）用于浏览器验证，
    本轮已清理；`scripts/mock_llm.py` 是保留的正式开发工具。
+8. **版本号只在 `nautilus/_version.py`**。pyproject/`/api/meta`/前端展示都从它取；
+   改角色/对象/动作后跑 `python scripts/gen_contract.py`（CI 会检查 `contract.ts` 是否过期）。
 
 ---
 

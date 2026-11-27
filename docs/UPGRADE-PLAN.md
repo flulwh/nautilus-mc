@@ -10,7 +10,17 @@
   `runtime.json` 指纹 + 启动认领（含无指纹的旧实例进程扫描接管）+ tail latest.log +
   RCON-only 指令通道 + `NAUTILUS_SHUTDOWN_POLICY=keep|stop`（**默认 keep，行为变更**）。
   真机验收：kill -9 面板后新面板认领同一 pid、日志流恢复、停止阶梯生效。
-- [ ] W0 CI / 契约自动化 / 发布工程
+- [x] **W0 CI / 契约自动化 / 发布工程** —— 2026-11-27 完成：
+  `.github/workflows/ci.yml`（pytest 矩阵 py3.11/3.12 × linux/windows + 前端 tsc/build +
+  「dist 必须与新鲜构建一致」漂移检查 + 产物上传）；
+  `release.yml`（tag 触发：stamp 版本+commit → sdist/wheel → GitHub Release，smoke 装 wheel 验证）+
+  `.github/release.yml` 发布说明模板；
+  契约：`tests/test_contract.py` 扫 `frontend/src` 全部 api/fetch/SSE 调用比对 `app.openapi()`，
+  `scripts/gen_contract.py` 从 `authz.py` 生成 `frontend/src/generated/contract.ts`（Users 角色下拉改用 ROLES）；
+  版本单一来源 `nautilus/_version.py`（pyproject dynamic attr；`/api/meta`、`/api/system` 返回 version+commit；
+  前端侧栏/登录页从 meta 取版本，不再硬编码）。
+  镜像+校验和：start.py 早已镜像优先/官方源回退，jar 下载 SHA-256/SHA-1（provision.py）、
+  JDK 下载 SHA-256（java_svc，清华镜像优先）——本轮复核确认，无缺漏。
 - [ ] W1-Step2 `nautilus-agent`
 - [ ] W2 状态持久化与数据层
 - [ ] W3–W7（详见下文）

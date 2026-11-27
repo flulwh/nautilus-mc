@@ -5,12 +5,14 @@ import { useState } from "react";
 
 import { api, ApiError } from "../api";
 import { EASE, staggerContainer, staggerItem } from "../motion";
+import { useVersion } from "../useVersion";
 
 export function Login({ onSuccess, authError }: { onSuccess: () => void; authError?: string }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(authError || "");
   const [loading, setLoading] = useState(false);
+  const version = useVersion();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,7 +70,7 @@ export function Login({ onSuccess, authError }: { onSuccess: () => void; authErr
 
         <motion.div variants={staggerItem}>
           <Text fz={10.5} c="dimmed" className="mono">
-            nautilus 0.1.0 · MIT
+            nautilus {version.replace(/^v/, "") || "…"} · MIT
           </Text>
         </motion.div>
       </motion.div>
