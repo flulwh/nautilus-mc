@@ -12,8 +12,10 @@ import io
 import os
 import socket
 import tarfile
+import tempfile
 import time
 import types
+from pathlib import Path
 
 import httpx
 import pytest
@@ -383,7 +385,14 @@ async def test_crash_restart_backoff_resets_after_healthy_run():
         rt.state = "running"
         rt.restarts = restarts
         rt.started_at = time.time() - uptime
-        await m._wait_exit(types.SimpleNamespace(id=server_id, auto_restart=True), rt)
+        await m._wait_exit(
+            types.SimpleNamespace(
+                id=server_id,
+                auto_restart=True,
+                directory=Path(tempfile.gettempdir()) / f"nautilus-fake-{server_id}",
+            ),
+            rt,
+        )
         task, rt.autorestart = rt.autorestart, None
         if task is not None:
             task.cancel()
@@ -438,3 +447,180 @@ async def test_plugin_download_rejects_missing_hash(tmp_path):
         pass
     else:
         raise AssertionError("没有哈希的下载源必须被拒绝")
+
+
+# --------------------------------------------------------- orphan adoption (W1)
+def _fake_server(tmp_path, sid, name):
+    import types as _types
+    from pathlib import Path as _Path
+
+    directory = tmp_path / name
+    (directory / "logs").mkdir(parents=True)
+    return _types.SimpleNamespace(
+        id=sid,
+        name=name,
+        jar="x.jar",
+        port=25565 + sid % 100,
+        rcon_port=25575 + sid % 100,
+        rcon_enabled=False,
+        rcon_password="",
+        auto_restart=False,
+        directory=_Path(directory),
+    )
+
+
+def _patch_servers(monkeypatch, servers):
+    class _Scalars:
+        def all(self):
+            return list(servers)
+
+    class _Res:
+        def scalars(self):
+            return _Scalars()
+
+    class _S:
+        async def execute(self, _q):
+            return _Res()
+
+    class _CM:
+        async def __aenter__(self):
+            return _S()
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr("nautilus.db.SessionFactory", lambda: _CM())
+
+
+async def test_claim_adopts_live_process_then_detects_its_death(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    import sys
+
+    import psutil
+
+    from nautilus.servers.manager import RUNTIME_FILE, ServerManager
+
+    server = _fake_server(tmp_path, 7001, "adopted")
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    rt = None
+    try:
+        ps = psutil.Process(proc.pid)
+        (server.directory / "logs" / "latest.log").write_text(
+            "[12:00:00] [Server thread/INFO]: Alice joined the game\n", encoding="utf-8"
+        )
+        (server.directory / RUNTIME_FILE).write_text(
+            json.dumps(
+                {"pid": proc.pid, "create_time": ps.create_time(), "jar": "x.jar",
+                 "port": server.port, "started_at": time.time(), "written_at": time.time()}
+            ),
+            encoding="utf-8",
+        )
+        _patch_servers(monkeypatch, [server])
+
+        m = ServerManager()
+        claimed = await m.claim_orphans()
+        assert claimed == [7001]
+        rt = m.get(7001)
+        assert rt.detached and rt.state == "running"
+        assert rt.snapshot()["pid"] == proc.pid
+        assert rt.snapshot()["detached"] is True
+        assert "Alice" in rt.console.players  # seeded from the log file tail
+
+        proc.kill()
+        proc.wait(timeout=10)
+        deadline = time.time() + 10
+        while time.time() < deadline and rt.state == "running":
+            await asyncio.sleep(0.3)
+        assert rt.state == "crashed"
+        assert not rt.detached
+        assert not (server.directory / RUNTIME_FILE).exists()
+    finally:
+        if rt is not None and rt.reader is not None:
+            rt.reader.cancel()
+        proc.kill()
+
+
+async def test_claim_discards_stale_fingerprint(tmp_path, monkeypatch):
+    import json
+
+    from nautilus.servers.manager import RUNTIME_FILE, ServerManager
+
+    server = _fake_server(tmp_path, 7002, "ghost")
+    (server.directory / RUNTIME_FILE).write_text(
+        json.dumps({"pid": 999_999, "create_time": 1.0, "jar": "x.jar",
+                    "port": 25566, "started_at": 0, "written_at": 0}),
+        encoding="utf-8",
+    )
+    _patch_servers(monkeypatch, [server])
+    m = ServerManager()
+    assert await m.claim_orphans() == []
+    assert not (server.directory / RUNTIME_FILE).exists()
+
+
+async def test_force_stop_works_on_adopted_process(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    import sys
+
+    import psutil
+
+    from nautilus.servers.manager import RUNTIME_FILE, ServerManager
+
+    server = _fake_server(tmp_path, 7003, "stoppable")
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    ps = psutil.Process(proc.pid)
+    (server.directory / RUNTIME_FILE).write_text(
+        json.dumps({"pid": proc.pid, "create_time": ps.create_time(), "jar": "x.jar",
+                    "port": server.port, "started_at": time.time(), "written_at": time.time()}),
+        encoding="utf-8",
+    )
+    _patch_servers(monkeypatch, [server])
+    m = ServerManager()
+    assert await m.claim_orphans() == [7003]
+    rt = m.get(7003)
+    await m.stop(server, force=True)
+    assert rt.state == "stopped"
+    assert not rt.detached
+    assert not (server.directory / RUNTIME_FILE).exists()
+    proc.wait(timeout=10)
+
+
+async def test_claim_falls_back_to_process_scan(tmp_path, monkeypatch):
+    """Pre-fingerprint orphans (panel upgraded mid-run) are adopted by scan."""
+    import psutil
+
+    from nautilus.servers import manager as mgr
+
+    server = _fake_server(tmp_path, 7004, "scanned")
+    real_ct = psutil.Process().create_time()
+
+    class Fake:
+        def __init__(self, pid, argv, cwd):
+            self.pid = pid
+            self.info = {"name": "java.exe", "cmdline": ["java.exe"] + argv, "cwd": cwd}
+
+        def create_time(self):
+            return real_ct
+
+        def net_connections(self, kind=None):
+            return []
+
+    good = Fake(4001, ["-jar", "x.jar"], str(server.directory))
+    wrong_dir = Fake(4002, ["-jar", "x.jar"], str(tmp_path))
+    wrong_arg = Fake(4003, ["-jarfile", "x.jar"], str(server.directory))
+    monkeypatch.setattr(mgr.psutil, "process_iter", lambda attrs=None: [wrong_dir, wrong_arg, good])
+    monkeypatch.setattr(mgr.ServerManager, "_owns_port", lambda self, ps, port: ps.pid == 4001)
+    monkeypatch.setattr(mgr, "_try_process", lambda pid: psutil.Process() if pid == 4001 else None)
+    _patch_servers(monkeypatch, [server])
+
+    m = mgr.ServerManager()
+    assert await m.claim_orphans() == [7004]
+    rt = m.get(7004)
+    try:
+        assert rt.detached and rt.state == "running"
+        # the fingerprint file was written for next time
+        assert (server.directory / mgr.RUNTIME_FILE).is_file()
+    finally:
+        if rt.reader:
+            rt.reader.cancel()

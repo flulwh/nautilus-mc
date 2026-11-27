@@ -12,6 +12,7 @@ export interface Runtime {
   rss_mb: number;
   install_pct: number;
   last_error: string;
+  detached?: boolean;
 }
 
 export interface Server {

@@ -45,6 +45,9 @@ async def lifespan(app: FastAPI):
     await init_db()
     await authz.reload_from_db()
     load_extensions()
+    adopted = await manager.claim_orphans()
+    if adopted:
+        log.info("re-adopted %d server(s) left running by the previous panel", len(adopted))
     metrics_svc.start()
     task_svc.start()
     await task_svc.sync_all()

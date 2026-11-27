@@ -17,6 +17,7 @@ RCON ``stop`` -> stdin ``stop`` -> SIGTERM/CTRL_BREAK -> kill.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shlex
@@ -44,6 +45,10 @@ MAX_LINE = 4000
 # treat a run longer than the reset window as "healthy" so the counter clears.
 AUTO_RESTART_MAX = 10
 AUTO_RESTART_RESET_S = 300
+#: Written next to a spawned server so a *new* panel process can recognise and
+#: adopt the JVM if the old panel was upgraded or killed (shutdown_policy=keep).
+RUNTIME_FILE = ".nautilus-runtime.json"
+TAIL_POLL_S = 0.7
 
 
 class ManagerError(RuntimeError):
@@ -71,17 +76,30 @@ class Runtime:
     autorestart: asyncio.Task | None = None
     install_pct: int = -1
     cpu_prev: tuple[float, float] | None = None
+    #: True when this runtime was adopted from a previous panel process: no
+    #: stdin/stdout pipes, console comes from tailing ``logs/latest.log``.
+    detached: bool = False
+    claimed_ct: float = 0.0
 
     @property
     def alive(self) -> bool:
-        return self.proc is not None and self.proc.returncode is None
+        if self.proc is not None and self.proc.returncode is None:
+            return True
+        return self.detached and self.ps is not None
+
+    def _live_pid(self) -> int | None:
+        if not self.alive:
+            return None
+        if self.proc is not None:
+            return self.proc.pid
+        return self.ps.pid if self.ps else None
 
     def snapshot(self) -> dict:
         latest = self.metrics[-1] if self.metrics else None
         return {
             "id": self.server_id,
             "state": self.state,
-            "pid": self.proc.pid if self.alive else None,
+            "pid": self._live_pid(),
             "started_at": self.started_at,
             "uptime": round(time.time() - self.started_at) if self.started_at and self.alive else 0,
             "players": sorted(self.console.players),
@@ -92,6 +110,7 @@ class Runtime:
             "rss_mb": round(latest["rss_mb"], 1) if latest else 0.0,
             "install_pct": self.install_pct,
             "last_error": self.console.last_error,
+            "detached": self.detached,
         }
 
 
@@ -181,6 +200,56 @@ def split_args(command: str) -> list[str]:
     if not command.strip():
         return []
     return _split_windows(command) if IS_WINDOWS else shlex.split(command, posix=True)
+
+
+# ------------------------------------------------------- runtime fingerprint file
+def _runtime_file(server: Server) -> Path:
+    return server.directory / RUNTIME_FILE
+
+
+def _write_runtime_file(server: Server, ps: psutil.Process, pid: int, started_at: float) -> None:
+    try:
+        create_time = ps.create_time()
+    except psutil.Error:
+        create_time = 0.0
+    payload = {
+        "pid": pid,
+        # create_time is what makes a recycled PID impossible to adopt: the
+        # kernel hands out the same pid constantly, but never with the same
+        # start time.
+        "create_time": create_time,
+        "jar": server.jar,
+        "port": server.port,
+        "started_at": started_at,
+        "written_at": time.time(),
+    }
+    try:
+        _runtime_file(server).write_text(json.dumps(payload), encoding="utf-8")
+    except OSError as exc:  # pragma: no cover
+        log.warning("cannot write %s: %s", RUNTIME_FILE, exc)
+
+
+def _clear_runtime_file(server: Server) -> None:
+    try:
+        _runtime_file(server).unlink(missing_ok=True)
+    except OSError:  # pragma: no cover
+        pass
+
+
+def _same_process(ps: psutil.Process | None, create_time: float) -> bool:
+    if ps is None:
+        return False
+    try:
+        return ps.is_running() and abs(ps.create_time() - create_time) < 1.0
+    except psutil.Error:
+        return False
+
+
+def _try_process(pid: int) -> psutil.Process | None:
+    try:
+        return psutil.Process(pid)
+    except psutil.Error:
+        return None
 
 
 class ServerManager:
@@ -333,6 +402,8 @@ class ServerManager:
                 rt.ps = psutil.Process(proc.pid)
             except psutil.Error:  # pragma: no cover
                 rt.ps = None
+            if rt.ps is not None:
+                _write_runtime_file(server, rt.ps, proc.pid, rt.started_at)
 
             rt.reader = asyncio.create_task(self._pump(server, rt), name=f"pump-{server.id}")
             rt.waiter = asyncio.create_task(self._wait_exit(server, rt), name=f"wait-{server.id}")
@@ -402,12 +473,12 @@ class ServerManager:
         if proc is None:
             return
         code = await proc.wait()
+        _clear_runtime_file(server)
         uptime = time.time() - rt.started_at if rt.started_at else 0
         rt.last_exit_code = code
         rt.proc = None
         rt.ps = None
         rt.stopped_at = time.time()
-        auto = server.auto_restart and not rt.expected_stop
         rt.state = "crashed" if (code not in (0, None) and not rt.expected_stop) else "stopped"
         self._publish_state(server.id, rt)
         bus.publish(topic(server.id, "log"), {"line": f"[nautilus] 进程退出，code={code}", "level": "warn"})
@@ -427,35 +498,280 @@ class ServerManager:
         if uptime > AUTO_RESTART_RESET_S:
             rt.restarts = 0
 
-        if auto and rt.restarts < AUTO_RESTART_MAX:
-            rt.restarts += 1
-            delay = min(60, 2 ** min(rt.restarts, 6))
+        self._schedule_auto_restart(server, rt)
 
-            async def _delayed() -> None:
-                await asyncio.sleep(delay)
-                try:
-                    # A deleted/re-created server must not be resurrected by a
-                    # timer that belongs to the old runtime.
-                    if self._rt.get(server.id) is not rt:
-                        return
-                    from ..db import SessionFactory
+    def _schedule_auto_restart(self, server: Server, rt: Runtime) -> None:
+        if not (server.auto_restart and not rt.expected_stop and rt.restarts < AUTO_RESTART_MAX):
+            return
+        rt.restarts += 1
+        delay = min(60, 2 ** min(rt.restarts, 6))
 
-                    async with SessionFactory() as s:
-                        fresh = await s.get(Server, server.id)
-                    # Re-read auto_restart: the admin may have switched it off
-                    # while this timer was sleeping.
-                    if fresh and fresh.auto_restart and not rt.expected_stop:
-                        await self.start(fresh)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # pragma: no cover
-                    log.warning("auto restart failed: %s", exc)
+        async def _delayed() -> None:
+            await asyncio.sleep(delay)
+            try:
+                # A deleted/re-created server must not be resurrected by a
+                # timer that belongs to the old runtime.
+                if self._rt.get(server.id) is not rt:
+                    return
+                from ..db import SessionFactory
 
-            rt.autorestart = asyncio.create_task(_delayed(), name=f"autorestart-{server.id}")
-            bus.publish(
-                topic(server.id, "log"),
-                {"line": f"[nautilus] {delay}s 后自动重启（第 {rt.restarts} 次）", "level": "warn"},
+                async with SessionFactory() as s:
+                    fresh = await s.get(Server, server.id)
+                # Re-read auto_restart: the admin may have switched it off
+                # while this timer was sleeping.
+                if fresh and fresh.auto_restart and not rt.expected_stop:
+                    await self.start(fresh)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover
+                log.warning("auto restart failed: %s", exc)
+
+        rt.autorestart = asyncio.create_task(_delayed(), name=f"autorestart-{server.id}")
+        bus.publish(
+            topic(server.id, "log"),
+            {"line": f"[nautilus] {delay}s 后自动重启（第 {rt.restarts} 次）", "level": "warn"},
+        )
+
+    # ---------------------------------------------------------- orphan adoption
+    def _owns_port(self, ps: psutil.Process, port: int) -> bool:
+        try:
+            return any(
+                c.status == psutil.CONN_LISTEN and c.laddr and c.laddr[1] == port
+                for c in ps.net_connections("tcp")  # type: ignore[attr-defined]
             )
+        except (psutil.Error, OSError, AttributeError):
+            return False
+
+    def _scan_candidate(self, server: Server) -> psutil.Process | None:
+        """Find an untracked JVM for this server (jar + cwd, preferring the one
+        holding the game port). Covers servers started by a pre-fingerprint
+        panel version, so upgrading the panel still re-adopts live servers."""
+        want_dir = str(server.directory).casefold()
+        matches: list[psutil.Process] = []
+        for p in psutil.process_iter(["pid", "name", "cmdline", "cwd"]):
+            try:
+                if not (p.info["name"] or "").lower().startswith("java"):
+                    continue
+                if str(p.info.get("cwd") or "").casefold().rstrip("\\/") != want_dir.rstrip("\\/"):
+                    continue
+                argv = p.info.get("cmdline") or []
+                if server.jar not in argv:
+                    continue
+                i = argv.index(server.jar)
+                if i == 0 or argv[i - 1] != "-jar":
+                    continue
+                matches.append(p)
+            except (psutil.Error, OSError, KeyError):
+                continue
+        if not matches:
+            return None
+        for p in matches:
+            if self._owns_port(p, server.port):
+                return p
+        return min(matches, key=lambda p: p.pid)
+
+    async def claim_orphans(self) -> list[int]:
+        """Adopt JVMs left behind by the previous panel process.
+
+        With ``shutdown_policy=keep`` a panel upgrade/crash leaves the servers
+        running. The stdout pipe died with the old panel (Java's PrintStream
+        swallows the broken pipe, so the JVM does not block or crash), which is
+        why the console comes from tailing ``logs/latest.log`` and commands are
+        RCON-only in this mode.
+        """
+        from sqlalchemy import select
+
+        from ..db import SessionFactory
+
+        claimed: list[int] = []
+        async with SessionFactory() as session:
+            servers = (await session.execute(select(Server))).scalars().all()
+            for server in servers:
+                path = _runtime_file(server)
+                pid = 0
+                create_time = 0.0
+                started_at = 0.0
+                fingerprint = False
+                if path.is_file():
+                    try:
+                        meta = json.loads(path.read_text(encoding="utf-8"))
+                        pid = int(meta["pid"])
+                        create_time = float(meta["create_time"])
+                        started_at = float(meta.get("started_at") or 0)
+                        fingerprint = _same_process(_try_process(pid), create_time)
+                    except (OSError, ValueError, KeyError):
+                        fingerprint = False
+                if not fingerprint:
+                    _clear_runtime_file(server)
+                    # No (valid) fingerprint: maybe an instance from before the
+                    # fingerprint existed, or a panel killed before it wrote one.
+                    scanned = self._scan_candidate(server)
+                    if scanned is None:
+                        continue
+                    pid, create_time, started_at = scanned.pid, scanned.create_time(), time.time()
+                    log.info("found untracked JVM for server %s (pid %s), adopting it", server.name, pid)
+                rt = self.get(server.id)
+                if rt.alive or rt.reader is not None:
+                    continue
+                ps = _try_process(pid)
+                if ps is None:
+                    _clear_runtime_file(server)
+                    continue
+                rt.detached = True
+                rt.claimed_ct = create_time
+                rt.proc = None
+                rt.ps = ps
+                rt.state = "running"
+                rt.started_at = started_at or time.time()
+                rt.stopped_at = None
+                rt.expected_stop = False
+                rt.last_exit_code = None
+                self._seed_console(server, rt)
+                rt.reader = asyncio.create_task(self._tail(server, rt), name=f"tail-{server.id}")
+                self._publish_state(server.id, rt)
+                _write_runtime_file(server, ps, pid, rt.started_at)
+                claimed.append(server.id)
+                log.info("adopted orphan of server %s (pid %s, port %s)", server.name, pid, server.port)
+        return claimed
+
+    def _seed_console(self, server: Server, rt: Runtime) -> None:
+        """Rebuild the visible console (and the online-players set) from the file."""
+        try:
+            raw = (server.directory / "logs" / "latest.log").read_bytes()[-512 * 1024 :]
+        except OSError:
+            raw = b""
+        for line in raw.decode("utf-8", errors="replace").splitlines()[-settings.max_log_lines :]:
+            rt.console.push(line[:MAX_LINE])
+
+    async def _tail(self, server: Server, rt: Runtime) -> None:
+        path = server.directory / "logs" / "latest.log"
+        offset = 0
+        try:
+            offset = path.stat().st_size
+        except OSError:
+            pass
+        lost = False
+        try:
+            while True:
+                await asyncio.sleep(TAIL_POLL_S)
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    size = 0
+                if size < offset:  # daily rotation or truncation: restart at 0
+                    offset = 0
+                if size > offset:
+                    try:
+                        with path.open("rb") as fh:
+                            fh.seek(offset)
+                            chunk = fh.read(size - offset)
+                            offset = fh.tell()
+                    except OSError:  # pragma: no cover
+                        continue
+                    for raw in chunk.decode("utf-8", errors="replace").splitlines():
+                        line = raw[:MAX_LINE]
+                        parsed = rt.console.push(line)
+                        bus.publish(
+                            topic(server.id, "log"),
+                            {
+                                "line": line.rstrip("\r"),
+                                "level": parsed.level,
+                                "stream": "log",
+                                "players": sorted(rt.console.players),
+                            },
+                        )
+                        if parsed.event == "ready" and rt.state != "running":
+                            rt.state = "running"
+                            self._publish_state(server.id, rt)
+                        elif parsed.event in {"join", "leave"}:
+                            bus.publish(topic(server.id, "players"), {"players": sorted(rt.console.players)})
+                if not _same_process(rt.ps, rt.claimed_ct):
+                    lost = True
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover
+            log.exception("console tail failed for server %s", server.id)
+        if lost and rt.detached and not rt.expected_stop:
+            # The adopted JVM died on its own: report it like an unclean exit.
+            rt.detached = False
+            rt.ps = None
+            rt.state = "crashed"
+            rt.stopped_at = time.time()
+            rt.last_exit_code = None
+            _clear_runtime_file(server)
+            self._publish_state(server.id, rt)
+            bus.publish(topic(server.id, "log"), {"line": "[nautilus] 接管的进程已消失", "level": "error"})
+            from .. import notify
+
+            notify.emit("server.crashed", server_id=server.id, detail={"code": None, "detached": True})
+            self._schedule_auto_restart(server, rt)
+
+    async def _kill_pid_tree(self, pid: int) -> None:
+        if IS_WINDOWS:
+            try:
+                await (
+                    await asyncio.create_subprocess_exec(
+                        "taskkill",
+                        "/F",
+                        "/T",
+                        "/PID",
+                        str(pid),
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                ).wait()
+            except OSError:  # pragma: no cover
+                pass
+            return
+        try:
+            parent = psutil.Process(pid)
+        except psutil.Error:
+            return
+        for child in parent.children(recursive=True):
+            try:
+                child.terminate()
+            except psutil.Error:
+                pass
+        try:
+            parent.terminate()
+            parent.wait(5)
+        except psutil.NoSuchProcess:
+            pass
+        except psutil.TimeoutExpired:
+            for proc in [parent, *parent.children(recursive=True)]:
+                try:
+                    proc.kill()
+                except psutil.Error:
+                    pass
+
+    async def _stop_detached(self, server: Server, rt: Runtime, *, force: bool) -> None:
+        pid = rt.ps.pid if rt.ps is not None else None
+        if not force and server.rcon_enabled and server.rcon_password and pid is not None:
+            try:
+                await rcon_client.command("127.0.0.1", server.rcon_port, server.rcon_password, "stop", timeout=5)
+                log.info("sent RCON stop to adopted server %s", server.id)
+            except rcon_client.RconError as exc:
+                log.debug("rcon stop unavailable: %s", exc)
+        deadline = time.monotonic() + (2 if force else min(settings.stop_grace_seconds, 30))
+        while time.monotonic() < deadline:
+            if not _same_process(rt.ps, rt.claimed_ct):
+                break
+            await asyncio.sleep(0.3)
+        if _same_process(rt.ps, rt.claimed_ct) and pid is not None:
+            await self._kill_pid_tree(pid)
+        if rt.reader is not None and not rt.reader.done():
+            rt.reader.cancel()
+        rt.detached = False
+        rt.ps = None
+        rt.stopped_at = time.time()
+        rt.last_exit_code = None
+        _clear_runtime_file(server)
+        rt.state = "stopped"
+        self._publish_state(server.id, rt)
+        from .. import notify
+
+        notify.emit("server.stopped", server_id=server.id, detail={"code": None, "detached": True})
 
     # ------------------------------------------------------------------- stop
     def _settle(self, rt: Runtime) -> None:
@@ -499,6 +815,9 @@ class ServerManager:
             was_running = rt.state == "running"
             rt.state = "stopping"
             self._publish_state(server.id, rt)
+            if rt.detached:
+                await self._stop_detached(server, rt, force=force)
+                return rt
             proc = rt.proc
             assert proc is not None
 
@@ -577,6 +896,8 @@ class ServerManager:
             except rcon_client.RconError as exc:
                 log.debug("rcon command failed, falling back to stdin: %s", exc)
         proc = rt.proc
+        if rt.detached:
+            raise ManagerError("接管模式下无法写 stdin（原管道已随旧面板关闭），请为该服务器启用 RCON")
         if proc is None or proc.stdin is None or proc.stdin.is_closing():
             raise ManagerError("控制台不可写")
         # Console commands may arrive from HTTP requests, scheduled tasks and
@@ -669,9 +990,12 @@ class ServerManager:
 
     # --------------------------------------------------------------- shutdown
     async def shutdown(self) -> None:
+        keep = settings.shutdown_policy == "keep"
         tasks = []
         for sid, rt in list(self._rt.items()):
             if rt.alive:
+                if keep:
+                    continue
                 from ..db import SessionFactory
 
                 async with SessionFactory() as s:
@@ -684,6 +1008,10 @@ class ServerManager:
             for t in (rt.reader, rt.waiter, rt.autorestart):
                 if t and not t.done():
                     t.cancel()
+        if keep:
+            kept = sum(1 for rt in self._rt.values() if rt.alive)
+            if kept:
+                log.info("shutdown_policy=keep: %d server process(es) stay running and will be re-adopted", kept)
 
 
 manager = ServerManager()

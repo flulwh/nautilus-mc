@@ -88,7 +88,7 @@ export function ServerDetail() {
   const serverId = Number(id);
   const qc = useQueryClient();
   const [tab, setTab] = useState<string | null>("console");
-  const [live, setLive] = useState<{ state?: string; players?: string[]; install_pct?: number }>({});
+  const [live, setLive] = useState<{ state?: string; players?: string[]; install_pct?: number; detached?: boolean }>({});
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.get<Me>("/auth/me"), staleTime: 60_000 });
   const perms = me.data?.permissions ?? [];
@@ -115,7 +115,12 @@ export function ServerDetail() {
 
   useSocket(Number.isFinite(serverId) ? `/ws/servers/${serverId}` : null, (msg) => {
     if (msg.t === "state") {
-      setLive({ state: String(msg.state), players: (msg.players as string[]) ?? [], install_pct: Number(msg.install_pct) });
+      setLive({
+        state: String(msg.state),
+        players: (msg.players as string[]) ?? [],
+        install_pct: Number(msg.install_pct),
+        detached: Boolean(msg.detached),
+      });
     } else if (msg.t === "players") {
       setLive((v) => ({ ...v, players: (msg.players as string[]) ?? [] }));
     } else if (msg.t === "progress") {
@@ -157,6 +162,7 @@ export function ServerDetail() {
         ? "metrics"
         : tab;
   const state = live.state ?? s.runtime.state;
+  const detached = live.detached ?? s.runtime.detached ?? false;
   const players = live.players ?? s.runtime.players;
   const running = state === "running" || state === "starting";
   const installing = (live.install_pct ?? s.runtime.install_pct) >= 0 && (live.install_pct ?? s.runtime.install_pct) < 100;
@@ -177,6 +183,13 @@ export function ServerDetail() {
                 {s.name}
               </Text>
               <StatusBadge state={state} />
+              {detached && (
+                <Tooltip label="面板重启后接管了这个进程：控制台日志来自文件尾随，指令仅支持 RCON（未启用 RCON 时无法从面板发指令）">
+                  <Badge size="xs" variant="light" color="gray">
+                    接管模式
+                  </Badge>
+                </Tooltip>
+              )}
               {installing && (
                 <Text fz={11} style={{ color: "var(--warn)" }} className="mono">
                   安装中 {live.install_pct ?? s.runtime.install_pct}%

@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     #: How often Paper-family servers are polled for /tps over RCON.
     tps_interval: float = 10.0
     stop_grace_seconds: int = 30
+    #: keep: panel exit leaves server JVMs running; the next panel start adopts
+    #: them via the runtime fingerprint (upgrade without dropping players).
+    #: stop: legacy behaviour, graceful-stop every server on panel shutdown.
+    shutdown_policy: Literal["keep", "stop"] = "keep"
     #: How many whole-server archives to keep per server (oldest pruned first).
     backup_keep: int = 10
     #: How many JFR recording files to keep per server (oldest pruned first).

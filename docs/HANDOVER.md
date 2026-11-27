@@ -124,6 +124,8 @@ Windows 用 `taskkill /F /T` 连带结束进程树。
 
 TPS 采样（P6.5）：APScheduler 每 `tps_interval`（默认 10s）对**运行中且开启 RCON 的 Paper/Purpur** 服务端发 `/tps`，解析结果进 `Runtime.tps` 环形缓冲（同 `metrics` 一样只存内存、重启即清）。不用 stdin 回退——那条路径拿不到关联的响应文本。
 
+面板重启不掉服（W1-Step1，2026-11-27）：`shutdown_policy` 默认 `keep`——面板退出只取消面板侧任务，JVM 存活。spawn 时在 `servers/<id>/.nautilus-runtime.json` 写 `{pid, create_time, jar, port, started_at}` 指纹，`_wait_exit` 确认退出后删。面板启动 `manager.claim_orphans()` 扫描指纹认领为 **detached Runtime**（`create_time` 防 PID 复用；无指纹的旧实例按 java + cwd + `-jar` 扫描接管）。detached 模式下 stdout 管道已随旧面板消失：控制台改为轮询尾随 `logs/latest.log`（Java `PrintStream` 吞掉 broken pipe，JVM 不阻塞），指令通道 RCON-only（`send` 对 stdin 明确报错）。前端 `ServerDetail` 显示「接管模式」徽章。设 `NAUTILUS_SHUTDOWN_POLICY=stop` 回到旧的全停行为。
+
 **坑 6**：Windows 上 `java.exe` 只是启动器，真正的 JVM 在子进程里。CPU/RSS 必须按
 `psutil` 进程树累加，CPU% 用累计 CPU 时间差分，不能直接读 `java.exe` 的数。
 
@@ -210,6 +212,10 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 
 ## 5. 已知遗留 / 下一步候选
 
+> **大规模升级（v0.1→v1.0）已定稿为 `docs/UPGRADE-PLAN.md`**：8 条工作流 W0–W7、里程碑
+> v0.2/v0.3/v1.0、结构性天花板的代码证据与「明确不做」清单都在那里。当前进度：
+> **W1-Step1（面板重启零停机）已完成**，见 §3.2；下一步是 W0（CI/契约/发布地基）与 W2（状态持久化）。
+
 ### 5.1 明确的待办
 
 1. **截图更新**：`docs/screenshots/` 里的图还是旧工业蓝主题拍的，UI 已改为 Codex
@@ -219,7 +225,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 
 | 阶段 | 内容 |
 |---|---|
-| P6.1 | 多节点：`nautilus-agent`（gRPC/WS 双向流），master 汇总，沿用同一 Domain 层 |
+| P6.1 | 多节点：`nautilus-agent`（gRPC/WS 双向流），master 汇总，沿用同一 Domain 层。**前半已落地**：W1-Step1 detach/reattach（面板重启零停机，见 §3.2）；独立 agent 守护进程（W1-Step2）仍待做 |
 | P6.2 | 备份调度：增量 zip + 异地上传（S3/WebDAV），保留策略 |
 | P6.3 | OIDC 单点登录（Authlib），企业用户目录对接 |
 | P6.4 | 插件市场聚合器：Modrinth + Hangar + CurseForge 统一检索与冲突检测 |
@@ -269,6 +275,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 | 23 | Adoptium API 的下载链接重定向到 GitHub Release，国内基本不可用 | 优先试清华 `mirrors.tuna.tsinghua.edu.cn/Adoptium` 镜像（文件名与 API package name 一致），失败回退源站，SHA-256 仍以 API 为准 |
 | 24 | `jcmd JFR.dump` 在没有进行中录制时**退出码 0** 且不写任何文件（"No recordings to dump from"） | 快照前必须先 `JFR.check` 确认有 running 录制并把 `name=` 传给它，否则接口会"成功"地返回一个不存在的文件 |
 | 25 | `JFR.check` 输出格式跨 JDK 版本不同（21：`Recording 1: name=x duration=30s (running)`；旧版 `name: (running)`），且 `jcmd` 只随 JDK 发布 | 解析正则兼容两种形态；面板托管运行时从 JRE 改为下载 JDK（旧 JRE 目录自动重建） |
+| 26 | 面板崩溃/重启后孤儿 JVM 的 stdout 管道已断，写会 EPIPE | Java `System.out` 是 `PrintStream`，吞掉 broken pipe 不崩（真机 kill -9 验证），所以接管模式改尾随 `logs/latest.log` 而非重连管道；PID 会被内核复用，认领必须比对 `psutil.create_time()`，只存 pid 会认错进程 |
 
 ---
 
