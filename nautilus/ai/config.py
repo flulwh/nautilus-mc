@@ -165,7 +165,7 @@ def public(cfg: AiConfig) -> dict[str, Any]:
 
 
 def build_model(cfg: AiConfig) -> Any:
-    """按 OpenAI 兼容协议构造模型。
+    """按 OpenAI 兼容协议构造聊天模型（LangChain ``ChatOpenAI``）。
 
     国内主流厂商（DeepSeek / 百炼 / Kimi / 智谱）和本地 Ollama 都遵守这套
     协议，所以一个 provider 足够，不需要按厂商写分支。
@@ -179,8 +179,13 @@ def build_model(cfg: AiConfig) -> Any:
     if not cfg.api_key and key_required(cfg.base_url):
         raise AiConfigError("未配置 API Key")
 
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.providers.openai import OpenAIProvider
+    from .model import ReasoningChatOpenAI
 
-    provider = OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key or "ollama")
-    return OpenAIChatModel(cfg.model, provider=provider)
+    return ReasoningChatOpenAI(
+        model=cfg.model,
+        base_url=cfg.base_url,
+        api_key=cfg.api_key or "ollama",
+        timeout=180,
+        max_retries=2,
+        streaming=True,
+    )

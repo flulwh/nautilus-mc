@@ -76,8 +76,8 @@
 | 审计 | `audit.py` | 所有写操作的不可变记录 | `audit.record(...)` |
 | 地址配置 | `addresses.py` | 面板对外地址（Host 推断兜底）、MCP 传输模式/监听地址，存 `settings_kv` | `load/save/public` |
 | AI 配置 | `ai/config.py` | 端点/模型/密钥配置，Fernet 加密后存 `settings_kv` | `load/save` |
-| AI 工具 | `ai/tools.py` | 把面板能力封装为 36 个工具：Casbin 权限、危险标记、超时、统一返回、写审计；不依赖 pydantic-ai / FastAPI | `TOOLS / catalogue()` |
-| AI agent | `ai/agent.py` | pydantic-ai 装配、SSE 事件映射、审批续跑、取消、工具超时、运行时指令、自动压缩、失败保留消息 | `stream_turn() / build_agent() / runtime_instructions()` |
+| AI 工具 | `ai/tools.py` | 把面板能力封装为 36 个工具：Casbin 权限、危险标记、超时、统一返回、写审计；不依赖 agent 框架 / FastAPI | `TOOLS / catalogue()` |
+| AI agent | `ai/agent.py` | LangGraph react 图（agent ⇄ tools）、SSE 事件映射、审批续跑、取消、工具超时、运行时指令、自动压缩、失败保留消息 | `stream_turn() / build_graph() / runtime_instructions()` |
 | 模型发现 | `ai/discovery.py` | `/v1/models` 拿名单，本地端点再读 `/api/tags` 补体积/参数量/量化；合并去重、限响应体、失败给可操作提示 | `discover()` |
 | AI 会话 | `ai/session.py` | 进程内多轮历史 + 标题/摘要元数据，按用户提问裁剪 + TTL/LRU；历史可序列化回前端 | `conversations / serialize()` |
 | 上下文压缩 | `ai/compaction.py` | 超阈值时模型摘要旧轮次（失败则确定性兜底），在用户提问边界裁剪，保留最近 10 轮原文 | `compact() / needs_compaction()` |
@@ -146,18 +146,17 @@ def register(app, hooks, bus):
 ```
 POST /api/ai/chat (SSE)
   → api/ai.py：校验 system:read / 模型配置，构造 Ctx(role, user_id, ip, source="panel")；生成 run_id
-  → ai/agent.py：build_agent() 用 OpenAI 兼容 provider 装配 pydantic-ai Agent
+  → ai/agent.py：build_graph() 用 OpenAI 兼容 provider（ReasoningChatOpenAI）装配 react 图
   → ai/trace.py：traces.begin(run_id) 开一条轨迹；每个 SSE 事件带 run_id + seq + ts
   → ai/compaction.py：新提问时若历史超阈值 → 模型摘要旧轮次 + SSE compacted（轨迹记 note 步）
-  → agent.run_stream_events()（instructions 注入时间/角色，静态提示词保持前缀稳定）
+  → graph.astream(stream_mode=["messages","updates"])（instructions 注入时间/角色，静态提示词保持前缀稳定）
       （run 开始前先发 SSE started，前端立刻切“思考中”，不等首字节；轨迹记 model 步）
-      PartDeltaEvent(ThinkingPartDelta) → SSE thinking（推理模型，如 reasoning_content）
-      PartDeltaEvent(TextPartDelta)   → SSE text
-      FunctionToolCallEvent           → SSE tool_call（轨迹记 tool 步 running，收尾 model 步）
-      DeferredToolRequestsEvent       → SSE approval_required（轨迹记 approval 步 waiting）
-      FunctionToolResultEvent         → SSE tool_result（轨迹 finish_step 写服务端真实耗时/结果）
+      messages 模式（agent 节点 chunk）→ SSE thinking / text（reasoning_content 由 ReasoningChatOpenAI 解析）
+      updates[agent] 带 tool_calls → SSE tool_call（轨迹记 tool 步 running，收尾 model 步）
+      updates[tools] 带 pending → SSE approval_required（轨迹记 approval 步 waiting，路由直接 END）
+      updates[tools] 带 tool_results → SSE tool_result（轨迹 finish_step 写服务端真实耗时/结果）
                                         update_plan 额外发 SSE plan（轨迹记 plan 步）
-      AgentRunResultEvent             → SSE done（usage / pending / status）
+      图自然结束（agent 无工具调用）→ SSE done（usage / pending / status）
   → ai/tools.py 包装器：_require(obj, act) → 真实服务函数 → audit.record("ai.<tool>")
   → 前端 header「执行轨迹」按钮：GET /api/ai/conversations/{id}/runs 列摘要，
     GET /api/ai/runs/{run_id} 取完整步骤时间线（审批续跑接在同一条 run 后）
@@ -165,21 +164,22 @@ POST /api/ai/chat (SSE)
 
 运行控制：
 
-- `POST /api/ai/chat` 在返回流之前先把 `CancellationToken` 注册进 `ai/runs.py`；
-  `POST /api/ai/cancel` 直接 cancel 它，run 抛 `RunCancelled`，`stream_turn` 发出 SSE
-  `cancelled` 并用 `capture_run_messages()` 把已产生的消息写回会话。
-- 每个工具有超时（只读 60s / 写 120s / 安装恢复 300s），由 `Tool(timeout=...)` 与
-  Agent 级 `tool_timeout` 双重兜底，避免 RCON 或下载卡死整轮。
-- 同一会话不允许两个 run 并存（409），防止两份 `message_history` 互相覆盖；
-  僵尸登记项按 TTL 清理。
-- `ProcessHistory(_compress_history)` 只压缩发给模型的旧工具结果，不改写存下来的历史；
-  最近 12 条消息原样发送，tool_call / tool_return 配对保持不变。
+- `POST /api/ai/chat` 在返回流之前先把 `CancellationToken`（自研，asyncio.Event）注册进 `ai/runs.py`；
+  `POST /api/ai/cancel` cancel 它，`stream_turn` 的泵把每个图事件与该 event 竞速，
+  发出 SSE `cancelled` 并把已累积的消息写回会话。
+- 每个工具有超时（只读 60s / 写 120s / 安装恢复 300s），tools 节点里 `asyncio.timeout`
+  兜底，避免 RCON 或下载卡死整轮；模型请求整体 180s。
+- 同一会话不允许两个 run 并存（409），防止两份历史互相覆盖；僵尸登记项按 TTL 清理。
+- `_compress_history` 只压缩发给模型的旧工具结果，不改写存下来的历史；
+  最近 12 条消息原样发送，tool_call / tool 返回配对保持不变。
 
 确认续跑：`POST /api/ai/approve` 带 `{call_id: bool}` 回到 `stream_turn()`，
-以 `DeferredToolResults` 恢复这一轮。**恢复时不能再传用户 prompt**，否则
-pydantic-ai 会报 unprocessed tool calls；所以确认接口只接审批结果。
+以 `resume=True` 入图 —— **从 tools 节点起步**，把批准/拒绝落地后再问模型。
+**恢复时不能再传用户 prompt**：历史末尾挂着未决 tool_calls，先补上 tool 消息
+才能继续，所以确认接口只接审批结果。新提问入图前会裁掉上一轮的悬空调用
+（`_sanitize_history`），防止 OpenAI 端点 400。
 审批项由 `ai/approvals.py` 按会话保存，30 分钟过期，id 不匹配或重复使用返回 409
-（语义参考 LangGraph 的 `interrupt()` / `Command(resume=...)`）。
+（刻意不用 interrupt/checkpointer：历史是纯 dict，为 W2 持久化铺路）。
 
 外部 agent：`python -m nautilus.mcp_server` 把 `tools.TOOLS` 原样注册为 MCP 工具，
 身份取自启动进程的环境变量 `NAUTILUS_MCP_ROLE` / `NAUTILUS_MCP_USER`，
@@ -266,7 +266,7 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | AI 越权 | 每个工具声明 `(obj, act)`，执行前以**当前用户角色**过 Casbin；AI 永远不会比调用者权限大 |
 | AI 误操作 | 危险工具需服务端校验的一次性审批；停止按钮真取消 run；工具超时兜底；同一会话禁止并发写历史 |
 | 审批重放 | 待确认项带 30 分钟 TTL，确认后即销毁；过期页面重复点击只会得到 409 |
-| 危险操作 | 删除/覆盖/强杀等工具标记 `dangerous`，未开自动确认时用 `DeferredToolRequests` 停下来等人点头，按 `call_id` 绑定结果 |
+| 危险操作 | 删除/覆盖/强杀等工具标记 `dangerous`，未开自动确认时图在 tools 节点收齐待确认项直接 END，按 `call_id` 绑定结果 |
 | 上下文膨胀 | 单个工具返回上限 24k 字符；模型往返步数上限 `max_steps`（1~40） |
 | MCP 暴露 | 复用同一批工具与审计；默认 stdio，配置切 http 时只监听 127.0.0.1；绑非本机地址会告警，身份由启动环境变量决定 |
 

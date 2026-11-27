@@ -141,19 +141,22 @@ async def test_config(session: SessionDep) -> dict[str, Any]:
     cfg = await ai_config.load(session)
     try:
         model = ai_config.build_model(cfg)
+        message = await asyncio.wait_for(
+            model.ainvoke(
+                [
+                    {"role": "system", "content": "只回复 OK 两个字符，不要别的。"},
+                    {"role": "user", "content": "ping"},
+                ]
+            ),
+            timeout=30,
+        )
     except ai_config.AiConfigError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-
-    from pydantic_ai import Agent
-
-    try:
-        agent = Agent(model, instructions="只回复 OK 两个字符，不要别的。")
-        result = await asyncio.wait_for(agent.run("ping"), timeout=30)
     except TimeoutError:
         return {"ok": False, "error": "连接超时（30s）"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-    return {"ok": True, "reply": str(result.output)[:80], "model": cfg.model}
+    return {"ok": True, "reply": str(message.content)[:80], "model": cfg.model}
 
 
 @router.post("/models", dependencies=[Depends(require("system", "manage"))])

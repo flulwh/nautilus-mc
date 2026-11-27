@@ -15,7 +15,8 @@ Nautilus 是一个**单进程内跑起来的 Minecraft 服务端 Web 管理面�
 指标曲线、RBAC 权限、审计日志，外加一个能读写面板全部能力的 **AI 助手**（含 MCP 出口）。
 
 它的设计立场：**基础设施不自研**。认证用 fastapi-users，权限用 Casbin，迁移用 Alembic，
-调度用 APScheduler，Agent 循环用 pydantic-ai，配置解析用 ruamel.yaml —— 每个都站在成熟上游上，
+调度用 APScheduler，Agent 循环用 LangGraph（2026-11-28 起，替换原 pydantic-ai；历史保持
+纯 dict 不与框架耦合），配置解析用 ruamel.yaml —— 每个都站在成熟上游上，
 面板只写"MC 服务端运维"这一层。
 
 ---
@@ -60,12 +61,13 @@ nautilus-mc/
 │   │   └── files.py configs.py plugins.py players.py backups.py
 │   │                  tasks.py worlds.py tokens.py
 │   ├── ai/           # AI 能力实现，与 HTTP 解耦
-│   │   ├── agent.py     # pydantic-ai 装配 + SSE 事件流
+│   │   ├── agent.py     # LangGraph react 图（agent ⇄ tools）+ SSE 事件流
+│   │   ├── model.py     # ReasoningChatOpenAI：解析 reasoning_content 思考增量
 │   │   ├── tools.py     # 36 个面板能力工具（唯一改动面板状态的入口）
 │   │   ├── trace.py     # 运行轨迹：逐步骤 + 真实耗时（进程内，TTL/LRU）
 │   │   ├── approvals.py # 危险操作人工确认，续跑复用同一 run_id
 │   │   ├── compaction.py # 上下文压缩
-│   │   ├── session.py   # 会话与消息历史
+│   │   ├── session.py   # 会话与消息历史（纯 dict，OpenAI 风格，为 W2 落库铺路）
 │   │   ├── runs.py      # 运行控制（注册/取消/活跃检测）
 │   │   ├── discovery.py # Ollama / OpenAI 兼容模型发现
 │   │   ├── plan.py playbooks.py config.py
@@ -236,7 +238,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 
 | 没做 | 为什么 |
 |---|---|
-| LangGraph / 自研 agent 框架 | pydantic-ai 已经够用，替换只会引入风险 |
+| 自研 agent 框架 | LangGraph 已接管（2026-11-28 迁移完成，见 UPGRADE-PLAN 进度）；仍不自写循环 |
 | LangSmith / OTel / Langfuse | 要额外部署与上报密钥，对单用户面板排障收益不抵运维成本 |
 | 轨迹落库 | 与会话同生命周期，重启即清，符合单 worker 定位 |
 | Monaco 编辑器 | 体积与依赖不划算，textarea + 后端原子写 + 语法校验够用 |

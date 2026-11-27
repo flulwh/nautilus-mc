@@ -1,16 +1,29 @@
 """运行中对话的注册表：服务端取消与重复提交保护。
 
-参考 pydantic-ai 的 CancellationToken 与 Claude Agent SDK 的 interrupt()：
 前端关掉 fetch 只是断开展示，工具还会继续跑；真正要“停下”，必须把信号
-送进 agent run 本身。这里按会话 key 存 token，停的时候直接 cancel。
+送进 agent run 本身。LangGraph 的图执行在我们自己的流式循环里，取消就是
+一个 asyncio.Event：循环每个事件检查一次，并取消进行中的模型请求任务。
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 
-from pydantic_ai import CancellationToken
+
+class CancellationToken:
+    """Minimal cooperative cancellation token (LangGraph has no built-in one)."""
+
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
 
 
 @dataclass

@@ -243,6 +243,12 @@ curl -s "https://api.modrinth.com/v2/search?limit=1" -H "User-Agent: nautilus/0.
 也没有启用工具搜索（ToolSearch）：36 个工具尚在可控范围，且国内 OpenAI 兼容端点对
 provider 原生工具发现支持不一致，本地策略反而会引入额外往返。
 
+> **2026-11-28 更新**：按升级要求，agent 循环已迁移到 LangGraph（react 图，
+> 见 architecture.md §4.5）。上文关于 pydantic-ai 专属 API（`CancellationToken` /
+> `ProcessHistory` / `capture_run_messages` / `DeferredToolRequests` / `ThinkingPart`）
+> 的描述保留作研究记录，其能力现由 `ai/agent.py`、`ai/model.py`、`ai/runs.py`
+> 等价实现；对话历史改为纯 dict，不再携带框架对象。
+
 ---
 
 ## 8. Agent 能力补强（2026-11-22）
@@ -264,6 +270,12 @@ provider 原生工具发现支持不一致，本地策略反而会引入额外�
 也没有启用工具搜索（ToolSearch）：36 个工具尚在可控范围，且国内 OpenAI 兼容端点对
 provider 原生工具发现支持不一致，本地策略反而会引入额外往返。
 
+> **2026-11-28 更新**：按升级要求，agent 循环已迁移到 LangGraph（react 图，
+> 见 architecture.md §4.5）。上文关于 pydantic-ai 专属 API（`CancellationToken` /
+> `ProcessHistory` / `capture_run_messages` / `DeferredToolRequests` / `ThinkingPart`）
+> 的描述保留作研究记录，其能力现由 `ai/agent.py`、`ai/model.py`、`ai/runs.py`
+> 等价实现；对话历史改为纯 dict，不再携带框架对象。
+
 ---
 
 ## 9. Ollama 模型发现（2026-11-22）
@@ -327,6 +339,8 @@ provider，直接从服务端拉取可选模型。
 按字符估算即可触发，避免为一个面板再背一份分词器；模型摘要失败时用确定性摘要兜底，
 不让一次网络抖动把会话拖死。会话仍只在进程内（重启丢失），这与原有设计一致。
 
+> **2026-11-28 注**：LangGraph 已按升级要求接管 agent 循环；SSE 事件合同保持不变。
+
 ---
 
 ## 10. 多会话、上下文压缩与反馈感（2026-11-22）
@@ -345,6 +359,8 @@ provider，直接从服务端拉取可选模型。
 协议，收益不足以抵消重写风险；只取可独立落地的模式。压缩没有固定接 tiktoken：
 按字符估算即可触发，避免为一个面板再背一份分词器；模型摘要失败时用确定性摘要兜底，
 不让一次网络抖动把会话拖死。会话仍只在进程内（重启丢失），这与原有设计一致。
+
+> **2026-11-28 注**：LangGraph 已按升级要求接管 agent 循环；SSE 事件合同保持不变。
 
 ---
 

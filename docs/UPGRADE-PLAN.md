@@ -21,6 +21,14 @@
   前端侧栏/登录页从 meta 取版本，不再硬编码）。
   镜像+校验和：start.py 早已镜像优先/官方源回退，jar 下载 SHA-256/SHA-1（provision.py）、
   JDK 下载 SHA-256（java_svc，清华镜像优先）——本轮复核确认，无缺漏。
+- [x] **AI agent 循环迁移 LangGraph（用户指定，2026-11-28 完成）**：
+  pydantic-ai → `langgraph` + `langchain-openai`（清华镜像安装；pydantic-ai-slim 已卸载，
+  全库 0 处 pydantic_ai 引用）。react 图 agent ⇄ tools；无 checkpointer/interrupt ——
+  审批挂起走「pending → END + approvals store」，确认续跑 `resume=True` 从 tools 节点入图。
+  对话历史改为**纯 dict**（OpenAI 风格，session.py），为 W2 落库铺路；
+  `ai/model.py` ReasoningChatOpenAI 补回 langchain-openai 丢弃的 `reasoning_content` 思考流。
+  SSE 事件合同、HTTP 端点、前端零改动；测试 fake 换成 ScriptedModel（BaseChatModel 替身），
+  新增 tool schema / max_steps 上限用例；146 全绿。
 - [ ] W1-Step2 `nautilus-agent`
 - [ ] W2 状态持久化与数据层
 - [ ] W3–W7（详见下文）
@@ -114,7 +122,7 @@
 - AI 预算：usage 落库 + 按角色 token 预算/限速。
 - 常规：CSP、镜像 non-root + read-only rootfs、依赖漏洞扫描进 CI。
 
-### W6 · AI 演进（不换框架）
+### W6 · AI 演进（agent 循环已换 LangGraph，2026-11-28）
 
 - 会话/轨迹持久化（W2）；AI 巡检 `scheduled_tasks kind=ai_inspect`；`search_logs`（FTS5）；golden-trajectory 评测回归（扩展 mock_llm.py）；`compact_model` 双模型路由；工具数 >~50 再重估分组。
 
@@ -132,7 +140,7 @@
 
 ## 五、明确不做
 
-不换 agent 框架（LangGraph / OpenAI Agents SDK）；不引 AGPL；不默认要求外部中间件（PG/Prometheus/restic 均为可选 extra）；不做内置 Web 终端；不做 K8s/Swarm 编排。
+不引 AGPL；不默认要求外部中间件（PG/Prometheus/restic 均为可选 extra）；不做内置 Web 终端；不做 K8s/Swarm 编排。（原「不换 agent 框架」一条已被 2026-11-28 的用户指令替换为 LangGraph，见进度。）
 
 ## 六、验收度量与前三风险
 

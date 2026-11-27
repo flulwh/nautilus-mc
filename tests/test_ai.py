@@ -1,17 +1,102 @@
-"""AI 助手：配置加密、工具权限、对话流、审批流、MCP 暴露。"""
+"""AI 助手：配置加密、工具权限、对话流、审批流、MCP 暴露。
+
+模型层用 ScriptedModel（langchain BaseChatModel 的测试替身）驱动：脚本是
+「轮次 → 脚本轮」映射，assistant 回复与工具调用都按真实 OpenAI 兼容流
+（_astream 逐 chunk + tool_call_chunks）走，顺带覆盖 agent 侧的 chunk 聚合。
+"""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCallPart
-from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from pydantic import Field
 
 from nautilus.ai import config as ai_config
 from nautilus.ai import tools as ai_tools
 from nautilus.db import session_scope
 from nautilus.models import Server, SettingKV
+
+
+class ScriptedModel(BaseChatModel):
+    """按调用轮次吐出预设回复的假模型。
+
+    turns 里每一项是一"轮"：``("thinking"|"text", str)`` 增量，或
+    ``("tool", id, name, args)``。_astream 拆逐 token chunk（工具调用走
+    tool_call_chunks，验证 agent 的增量拼接）；_generate 给 ainvoke 路径
+    （/config/test、上下文摘要）用。
+    """
+
+    turns: list = Field(default_factory=list)
+    calls: list = Field(default_factory=list)
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools, **kwargs):  # noqa: D102
+        return self
+
+    def _plan(self, messages) -> list[tuple]:
+        self.calls.append(messages)
+        if len(self.calls) > len(self.turns):
+            return []
+        return self.turns[len(self.calls) - 1]
+
+    def _reply(self, plan: list[tuple]) -> AIMessage:
+        content = "".join(p[1] for p in plan if p[0] == "text")
+        kwargs: dict[str, Any] = {}
+        thinking = "".join(p[1] for p in plan if p[0] == "thinking")
+        if thinking:
+            kwargs["reasoning_content"] = thinking
+        return AIMessage(
+            content=content,
+            additional_kwargs=kwargs,
+            tool_calls=[{"id": p[1], "name": p[2], "args": p[3], "type": "tool_call"} for p in plan if p[0] == "tool"],
+        )
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self._reply(self._plan(messages)))])
+
+    async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
+        plan = self._plan(messages)
+        if all(p[0] != "tool" for p in plan):
+            for kind, value in plan:
+                for piece in _split(value):
+                    chunk = (
+                        AIMessageChunk(content="", additional_kwargs={"reasoning_content": piece})
+                        if kind == "thinking"
+                        else AIMessageChunk(content=piece)
+                    )
+                    yield ChatGenerationChunk(message=chunk)
+            return
+        for index, p in enumerate(plan):
+            if p[0] in {"thinking", "text"}:
+                for piece in _split(p[1]):
+                    chunk = (
+                        AIMessageChunk(content="", additional_kwargs={"reasoning_content": piece})
+                        if p[0] == "thinking"
+                        else AIMessageChunk(content=piece)
+                    )
+                    yield ChatGenerationChunk(message=chunk)
+            elif p[0] == "tool":
+                args = json.dumps(p[3], ensure_ascii=False)
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="",
+                        tool_call_chunks=[{"name": p[2], "args": args, "id": p[1], "index": index}],
+                    )
+                )
+
+
+def _split(text: str) -> list[str]:
+    if not text:
+        return []
+    half = len(text) // 2 or len(text)
+    return [piece for piece in (text[:half], text[half:]) if piece]
 
 
 def _events(body: str) -> list[dict[str, Any]]:
@@ -118,43 +203,29 @@ async def test_tool_unknown_server():
 
 
 # ----------------------------------------------------------------- chat (SSE)
-def _as_model(fn) -> FunctionModel:
-    """把「给定消息 -> ModelResponse」的函数包成可流式的模型。
+def _text_model(reply: str) -> ScriptedModel:
+    return ScriptedModel(turns=[[("text", reply)]])
 
-    ``stream_function`` 是必需的：面板走 run_stream_events，FunctionModel 没有
-    流式实现就会直接报错。这里把同一份响应拆成增量吐出来，顺便验证前端拼接。
+
+def _tool_then_text(tool: str, args: dict[str, Any], reply: str) -> ScriptedModel:
+    """看过工具返回就改口说话；否则先发起调用。
+
+    按**消息内容**（而不是调用计数）分支：审批续跑是新的图运行、新模型实例，
+    计数法会把第二轮错当成第一轮。
     """
 
-    async def stream(messages, info):
-        for part in fn(messages, info).parts:
-            if isinstance(part, TextPart):
-                text = part.content
-                half = len(text) // 2 or len(text)
-                for chunk in (text[:half], text[half:]):
-                    if chunk:
-                        yield chunk
-            elif isinstance(part, ToolCallPart):
-                yield {0: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args), tool_call_id=part.tool_call_id)}
+    class ToolFirst(ScriptedModel):
+        def _plan(self, messages) -> list[tuple]:
+            self.calls.append(messages)
+            # langchain 会把 dict 转成 BaseMessage，两种形态都要认。
+            seen_tool = any(
+                (isinstance(m, dict) and m.get("role") == "tool") or isinstance(m, ToolMessage) for m in messages
+            )
+            if seen_tool:
+                return [("text", reply)]
+            return [("tool", f"call_{len(self.calls)}", tool, args)]
 
-    return FunctionModel(fn, stream_function=stream)
-
-
-def _text_model(reply: str) -> FunctionModel:
-    def fn(messages, info):
-        return ModelResponse(parts=[TextPart(reply)])
-
-    return _as_model(fn)
-
-
-def _tool_then_text(tool: str, args: dict[str, Any], reply: str) -> FunctionModel:
-    def fn(messages, info):
-        for message in messages:
-            for part in getattr(message, "parts", ()):
-                if type(part).__name__ == "ToolReturnPart":
-                    return ModelResponse(parts=[TextPart(reply)])
-        return ModelResponse(parts=[ToolCallPart(tool, args)])
-
-    return _as_model(fn)
+    return ToolFirst()
 
 
 async def test_chat_streams_text(admin, monkeypatch):
@@ -325,9 +396,6 @@ async def test_cancel_endpoint_without_run(admin):
 async def test_cancel_stops_agent_run(monkeypatch):
     import asyncio
 
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.models.function import FunctionModel
-
     from nautilus.ai import agent as ai_agent
     from nautilus.ai import runs as run_store
     from nautilus.ai.session import conversations
@@ -335,16 +403,14 @@ async def test_cancel_stops_agent_run(monkeypatch):
     await _enable_ai()
     started = asyncio.Event()
 
-    def fn(messages, info):
-        return ModelResponse(parts=[TextPart("hi")])
+    class SlowChunks(ScriptedModel):
+        async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
+            started.set()
+            yield ChatGenerationChunk(message=AIMessageChunk(content="partial"))
+            await asyncio.sleep(30)
+            yield ChatGenerationChunk(message=AIMessageChunk(content="never"))
 
-    async def stream(messages, info):
-        started.set()
-        yield "partial"
-        await asyncio.sleep(30)
-        yield "never"
-
-    monkeypatch.setattr(ai_config, "build_model", lambda cfg: FunctionModel(fn, stream_function=stream))
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: SlowChunks())
     async with session_scope() as s:
         cfg = await ai_config.load(s)
 
@@ -370,37 +436,57 @@ async def test_cancel_stops_agent_run(monkeypatch):
 
 
 def test_history_compression_keeps_recent_and_original():
-    from dataclasses import replace as dc_replace
-
-    from pydantic_ai.messages import ModelResponse, ToolReturnPart
-
     from nautilus.ai.agent import _compress_history
 
-    old = ModelResponse(parts=[ToolReturnPart(tool_name="t", content="x" * 1000, tool_call_id="1")])
-    recent = ModelResponse(parts=[ToolReturnPart(tool_name="t", content="y" * 1000, tool_call_id="2")])
-    messages = [old] * 13 + [recent]
+    old = {"role": "tool", "tool_call_id": "1", "name": "t", "content": "x" * 1000}
+    recent = {"role": "tool", "tool_call_id": "2", "name": "t", "content": "y" * 1000}
+    messages = [{"role": "user", "content": "q"}, old] * 7 + [recent]
     out = _compress_history(messages)
     assert len(out) == len(messages)
-    assert len(out[0].parts[0].content) < 1000 and "已压缩" in out[0].parts[0].content
-    assert out[-1].parts[0].content == "y" * 1000
-    assert old.parts[0].content == "x" * 1000, "压缩只影响发给模型的副本"
-    assert dc_replace(old, parts=[]).parts == []
+    assert len(out[1]["content"]) < 1000 and "已压缩" in out[1]["content"]
+    assert out[-1]["content"] == "y" * 1000
+    assert messages[1]["content"] == "x" * 1000, "压缩只影响发给模型的副本"
 
 
 def test_agent_applies_tool_timeouts():
     from nautilus.ai import agent as ai_agent
 
-    cfg = ai_config.AiConfig(
-        enabled=True,
-        base_url="http://127.0.0.1:1/v1",
-        model="m",
-        api_key="x",
-    )
-    built = ai_agent.build_agent(cfg)
-    registered = built._function_toolset.tools
-    assert registered["list_servers"].timeout == 60.0
-    assert registered["update_config"].timeout == 120.0
-    assert registered["create_backup"].timeout == 300.0
+    assert ai_agent._timeout_for(ai_tools.TOOLS["list_servers"]) == 60.0
+    assert ai_agent._timeout_for(ai_tools.TOOLS["update_config"]) == 120.0
+    assert ai_agent._timeout_for(ai_tools.TOOLS["create_backup"]) == 300.0
+    if ai_tools.TOOLS["server_status"].timeout is None:
+        assert ai_agent._timeout_for(ai_tools.TOOLS["server_status"]) == 60.0
+
+
+def test_tool_schemas_cover_registry_and_types():
+    """OpenAI function schema：全量工具、必填参数与 int 类型都要正确还原。"""
+    from nautilus.ai.agent import _tool_schemas
+
+    schemas = {item["function"]["name"]: item["function"] for item in _tool_schemas()}
+    assert set(schemas) == set(ai_tools.TOOLS)
+    kill = schemas["server_kill"]
+    assert kill["parameters"]["properties"]["server_id"]["type"] == "integer"
+    assert "server_id" in kill["parameters"]["required"]
+    listing = schemas["list_servers"]
+    assert listing["parameters"]["properties"] == {} and listing["description"]
+
+
+async def test_max_steps_limit_emits_error(admin, monkeypatch):
+    """模型一直要调工具时,到达 max_steps 必须收尾报错,而不是无限循环。"""
+
+    class ToolAlways(ScriptedModel):
+        def _plan(self, messages):
+            self.calls.append(messages)
+            return [("tool", f"call_{len(self.calls)}", "list_servers", {})]
+
+    await _enable_ai(max_steps=2)
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: ToolAlways())
+    r = await admin.post("/api/ai/chat", json={"message": "反复查"})
+    assert r.status_code == 200
+    events = _events(r.text)
+    errors = [e for e in events if e["type"] == "error"]
+    assert errors and "步数" in errors[0]["message"], [e["type"] for e in errors]
+    assert not any(e["type"] == "done" for e in events)
 
 
 # ------------------------------------------------------------ model discovery
@@ -577,23 +663,14 @@ def test_local_endpoint_needs_no_key():
 
 # -------------------------------------------------------- sessions & context
 def test_session_metadata_and_serialization():
-    from pydantic_ai.messages import (
-        ModelRequest,
-        ModelResponse,
-        TextPart,
-        ToolCallPart,
-        ToolReturnPart,
-        UserPromptPart,
-    )
-
     from nautilus.ai.session import conversations, serialize
 
     cid = conversations.new_id()
     history = [
-        ModelRequest(parts=[UserPromptPart(content="重启 1 号服")]),
-        ModelResponse(parts=[ToolCallPart("server_status", {"server_id": 1}, tool_call_id="c1")]),
-        ModelRequest(parts=[ToolReturnPart("server_status", {"ok": True, "running": False}, tool_call_id="c1")]),
-        ModelResponse(parts=[TextPart("查到了，1 号服当前是关的。")]),
+        {"role": "user", "content": "重启 1 号服"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "server_status", "args": {"server_id": 1}}]},
+        {"role": "tool", "tool_call_id": "c1", "name": "server_status", "content": '{"ok": true, "running": false}'},
+        {"role": "assistant", "content": "查到了，1 号服当前是关的。"},
     ]
     conversations.put(cid, history)
     meta = conversations.meta(cid)
@@ -609,7 +686,16 @@ def test_session_metadata_and_serialization():
     assert conversations.set_title(cid, "改个名字") is True
     assert conversations.meta(cid)["title"] == "改个名字"
     assert conversations.set_title("missing", "x") is False
+
+    # 悬空工具调用（历史末尾等确认/被取消）不能把标题带偏，序列化也要能回放。
+    dangling = [*history, {"role": "assistant", "content": "我先强杀", "tool_calls": [{"id": "c2", "name": "server_kill", "args": {"server_id": 2}}]}]
+    cid2 = conversations.new_id()
+    conversations.put(cid2, dangling)
+    replayed = serialize(dangling)
+    assert replayed[-1]["type"] == "tool_call" and replayed[-1]["id"] == "c2"
+
     conversations.drop(cid)
+    conversations.drop(cid2)
 
 
 async def test_conversation_history_and_rename_endpoints(admin, monkeypatch):
@@ -632,37 +718,39 @@ async def test_conversation_history_and_rename_endpoints(admin, monkeypatch):
 
 
 def test_compaction_boundaries_and_fallback(monkeypatch):
-    from pydantic_ai.messages import (
-        ModelRequest,
-        ModelResponse,
-        TextPart,
-        UserPromptPart,
-    )
-
     from nautilus.ai import compaction
 
     monkeypatch.setattr(compaction, "CONTEXT_MESSAGES", 6)
     messages = []
     for i in range(20):
-        messages.append(ModelRequest(parts=[UserPromptPart(content=f"问题{i}")]))
-        messages.append(ModelResponse(parts=[TextPart(f"回答{i}")]))
+        messages.append({"role": "user", "content": f"问题{i}"})
+        messages.append({"role": "assistant", "content": f"回答{i}"})
     assert compaction.needs_compaction(messages) is True
 
     cut = compaction.safe_cut(messages, keep=4)
-    assert cut > 0 and type(messages[cut]).__name__ == "ModelRequest"
-    assert any(getattr(p, "part_kind", "") == "user-prompt" for p in messages[cut].parts)
+    assert cut > 0 and messages[cut]["role"] == "user"
 
     summary = compaction.fallback_summary(messages[:cut])
     assert "用户" in summary and "助手" in summary
 
     compacted = compaction.build_compacted(messages, cut, summary)
     assert len(compacted) == len(messages) - cut + 2
-    assert compacted[0].parts[0].content.startswith(compaction.MARKER)
+    assert compacted[0]["content"].startswith(compaction.MARKER)
     assert compacted[2:] == messages[cut:]
 
-    # 工具调用中间不能切
-    dangling = [*messages, ModelResponse(parts=[])]
-    assert compaction.safe_cut(dangling, keep=len(dangling)) == 0
+    # 切点范围内没有用户提问时不压（keep 吃掉全部）。
+    assert compaction.safe_cut(messages, keep=len(messages)) == 0
+
+    # 带工具调用的轮次：切点必须落在轮首，不能切在 assistant/tool 中间。
+    round_with_tool = [
+        {"role": "user", "content": "查状态"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "name": "list_servers", "args": {}}]},
+        {"role": "tool", "tool_call_id": "t1", "name": "list_servers", "content": '{"ok": true}'},
+        {"role": "assistant", "content": "共 1 台"},
+    ]
+    mixed = messages[:16] + round_with_tool
+    cut2 = compaction.safe_cut(mixed, keep=4)
+    assert cut2 > 0 and mixed[cut2]["role"] == "user"
 
 
 async def test_auto_compaction_emits_event(admin, monkeypatch):
@@ -670,8 +758,13 @@ async def test_auto_compaction_emits_event(admin, monkeypatch):
 
     monkeypatch.setattr(compaction, "CONTEXT_MESSAGES", 6)
     monkeypatch.setattr(compaction, "KEEP_RECENT", 2)
+
+    async def fake_summary(messages, cfg, focus=""):
+        return "摘要内容"
+
+    monkeypatch.setattr(compaction, "model_summary", fake_summary)
     await _enable_ai()
-    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _text_model("摘要内容"))
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _text_model("好的"))
 
     cid = None
     compacted_seen = False
@@ -764,47 +857,43 @@ async def test_tool_install_project_full_chain(app, monkeypatch):
 
 async def test_chat_emits_thinking_and_started(admin, monkeypatch):
     """推理增量必须以 thinking 事件实时给出，且模型调用前先发 started。"""
-    from pydantic_ai.models.function import DeltaThinkingPart
-
-    def fn(messages, info):
-        return ModelResponse(parts=[ThinkingPart("先算一下"), TextPart("结果 42")])
-
-    async def stream(messages, info):
-        # FunctionModel 把同 index 的首个 thinking delta 当起始帧吞掉，
-        # 第二个才真正发 ThinkingPartDelta；真实模型每个 chunk 都是 delta。
-        # 文本拼接由 test_chat_streams_text 覆盖，这里只验证事件类型与顺序。
-        yield {0: DeltaThinkingPart(content="先算一下")}
-        yield {0: DeltaThinkingPart(content="再核对一遍")}
-        yield "结果 42"
-
-    from pydantic_ai.models.function import FunctionModel
-
     await _enable_ai()
-    monkeypatch.setattr(ai_config, "build_model", lambda cfg: FunctionModel(fn, stream_function=stream))
+    monkeypatch.setattr(
+        ai_config,
+        "build_model",
+        lambda cfg: ScriptedModel(
+            turns=[[("thinking", "先算一下"), ("thinking", "再核对一遍"), ("text", "结果 42")]]
+        ),
+    )
     r = await admin.post("/api/ai/chat", json={"message": "算个数"})
     assert r.status_code == 200, r.text
     events = _events(r.text)
     types = [e["type"] for e in events]
     assert "started" in types, f"应当发 started，实际：{types}"
     assert types.index("started") < types.index("thinking")
-    thinking = [e["delta"] for e in events if e["type"] == "thinking"]
-    assert thinking and any("核对" in t for t in thinking), thinking
+    assert types.index("thinking") < types.index("text"), "思考增量应早于正文"
+    thinking = "".join(e["delta"] for e in events if e["type"] == "thinking")
+    assert "先算一下" in thinking and "再核对一遍" in thinking, thinking
 
 
-async def test_openai_compatible_reasoning_content_becomes_thinking(monkeypatch):
-    """真实 OpenAI 兼容 provider 的 reasoning_content 必须被解析成 thinking 增量。
+async def test_openai_compatible_reasoning_content_becomes_thinking(admin, monkeypatch):
+    """真实 OpenAI 兼容 provider 的 reasoning_content 必须被解析成思考增量。
 
-    这验证了 config.build_model 的默认 profile 已能识别 DeepSeek/Moonshot 的
-    reasoning_content 字段，无需额外配置——前端因此能显示推理过程。
+    这验证 config.build_model 用的 ReasoningChatOpenAI 已能识别
+    DeepSeek/Moonshot 的 reasoning_content 字段（langchain-openai 基类会
+    直接丢弃它），前端因此能显示推理过程。
     """
-    import httpx2
+    import httpx
+
+    from nautilus.ai import agent as ai_agent
+    from nautilus.ai import model as ai_model
 
     def handler(request):
         chunks = [
             {"role": "assistant", "reasoning_content": "先想想"},
             {"reasoning_content": "再核对"},
             {"content": "答案 42"},
-            {},
+            {"content": ""},
         ]
         lines = []
         for i, delta in enumerate(chunks):
@@ -814,24 +903,34 @@ async def test_openai_compatible_reasoning_content_becomes_thinking(monkeypatch)
                 f'"choices":[{{"index":0,"delta":{json.dumps(delta)},"finish_reason":{json.dumps(fin)}}}]}}\n\n'
             )
         lines.append("data: [DONE]\n\n")
-        return httpx2.Response(200, text="".join(lines), headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, text="".join(lines), headers={"content-type": "text/event-stream"})
 
-    from pydantic_ai import Agent
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.providers.openai import OpenAIProvider
-
-    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
-    provider = OpenAIProvider(base_url="https://api.deepseek.com/v1", api_key="sk-x", http_client=client)
-    model = OpenAIChatModel("deepseek-reasoner", provider=provider)
-    agent = Agent(model)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    model = ai_model.ReasoningChatOpenAI(
+        model="deepseek-reasoner",
+        base_url="https://api.deepseek.com/v1",
+        api_key="sk-x",
+        http_async_client=client,
+    )
     try:
-        types: list[str] = []
-        async with agent.run_stream_events("算一下") as stream:
-            async for event in stream:
-                delta = getattr(event, "delta", None)
-                if delta is not None:
-                    types.append(type(delta).__name__)
-        assert "ThinkingPartDelta" in types, f"应当解析出思考增量，实际：{types}"
+        thinkings: list[str] = []
+        texts: list[str] = []
+        async for chunk in model.astream("算一下"):
+            thinkings.append(ai_model.message_thinking(chunk))
+            texts.append(chunk.content if isinstance(chunk.content, str) else "")
+        joined_thinking = "".join(t for t in thinkings if t)
+        assert "先想想" in joined_thinking and "再核对" in joined_thinking
+        assert "答案 42" in "".join(texts)
+
+        # 端到端：stream_turn 必须把 provider 思考转成 thinking 事件，且 started 在前。
+        await _enable_ai()
+        monkeypatch.setattr(ai_config, "build_model", lambda cfg: model)
+        r = await admin.post("/api/ai/chat", json={"message": "再算一次"})
+        events = _events(r.text)
+        types = [e["type"] for e in events]
+        assert "started" in types and types.index("started") < types.index("thinking")
+        deltas = [e["delta"] for e in events if e["type"] == "thinking"]
+        assert "先想想" in "".join(deltas), deltas
     finally:
         await client.aclose()
 
@@ -914,17 +1013,7 @@ async def test_approve_reuses_same_run_id(admin, monkeypatch):
     trace_store.traces._data.clear()
     await _enable_ai(auto_approve=False)
 
-    def make_model():
-        def fn(messages, info):
-            for message in messages:
-                for part in getattr(message, "parts", ()):
-                    if type(part).__name__ == "ToolReturnPart":
-                        return ModelResponse(parts=[TextPart("杀掉了")])
-            return ModelResponse(parts=[ToolCallPart("server_kill", {"server_id": 999999})])
-
-        return _as_model(fn)
-
-    monkeypatch.setattr(ai_config, "build_model", lambda cfg: make_model())
+    monkeypatch.setattr(ai_config, "build_model", lambda cfg: _tool_then_text("server_kill", {"server_id": 999999}, "杀掉了"))
     r = await admin.post("/api/ai/chat", json={"message": "强杀服务器"})
     first = _events(r.text)
     run_id = first[0]["run_id"]

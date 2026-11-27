@@ -42,10 +42,12 @@ dependencies = [
     "httpx>=0.27",
     "async-mcrcon>=0.1",
     "mcstatus>=11.0",
-    # AI assistant: pydantic-ai is the Pydantic team's agent loop (tools,
-    # streaming, human-in-the-loop approval); openai extra speaks the
-    # OpenAI-compatible protocol used by DeepSeek/Qwen/Kimi/Ollama.
-    "pydantic-ai-slim[openai]>=2.71",
+    # AI assistant: LangGraph drives the react loop (model node <-> tools node),
+    # langchain-openai speaks the OpenAI-compatible protocol used by
+    # DeepSeek/Qwen/Kimi/Ollama. History stays framework-free dicts (ai/session.py).
+    "langgraph>=1.2,<2",
+    "langchain-openai>=1.8,<2",
+    "langchain-core>=1.8,<2",
     # MCP server so external agents can drive the panel too.
     "mcp>=2.3",
     # Fernet encryption for the stored model API key.

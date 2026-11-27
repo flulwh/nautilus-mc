@@ -1,12 +1,18 @@
-"""把工具挂到 pydantic-ai 的 Agent 上，并把一次 run 拆成前端能消费的事件流。
+"""LangGraph 版运维 agent：把工具挂到 react 状态图上，把一次 run 拆成前端事件流。
 
-为什么用 pydantic-ai 而不是自己写 tool-calling 循环：它已经把「模型往返 ->
-工具执行 -> 再往返」这个状态机、流式增量、以及 ``requires_approval`` 人工审批
-做完了，我们再手写一遍只会漏边界情况。
+为什么换成 LangGraph：它的图执行与流式（messages/updates 双流）最成熟，社区
+文档（langgraph.com.cn）齐全；旧框架的消息对象一旦落库就成了持久化（W2）的
+包袱。这一层刻意让历史保持**纯 dict**（OpenAI 风格，见 session.py），
+LangGraph 只是执行器。
 
-这一层额外补的是**运维侧的健壮性**：服务端取消、工具超时、失败后保留消息、
-以及长对话里旧工具结果的压缩。做法参考 pydantic-ai 官方的 CancellationToken /
-ProcessHistory 能力与 Claude Agent SDK 的 interrupt + TodoWrite 模式。
+与旧实现等价的健壮性：
+* 服务端取消 —— 每取一个图事件都与 CancellationToken 的 event 竞速；
+* 工具超时 —— 每个工具按类别 asyncio.timeout（安装/恢复量级给 300s）；
+* 人工审批 —— 不用 checkpointer/interrupt：待确认集合持久化在 approvals store，
+  确认后 HTTP 层以 ``approvals`` 重新入图，从 tools 节点续跑；
+* 失败保留 —— 事件流里同步累积消息，取消时把已完成部分写回会话。
+
+SSE 事件合同（type/字段名/顺序）与前端完全不变。
 """
 
 from __future__ import annotations
@@ -15,36 +21,19 @@ import asyncio
 import inspect
 import json
 import logging
+import operator
 import time
+import typing
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, replace
-from typing import Any
+from dataclasses import dataclass
+from typing import Annotated, Any, TypedDict
 
-from pydantic_ai import (
-    Agent,
-    AgentRunResultEvent,
-    CancellationToken,
-    DeferredToolRequests,
-    DeferredToolResults,
-    RunCancelled,
-    Tool,
-    UsageLimits,
-    capture_run_messages,
-)
-from pydantic_ai.capabilities import ProcessHistory
-from pydantic_ai.messages import (
-    DeferredToolRequestsEvent,
-    FunctionToolCallEvent,
-    FunctionToolResultEvent,
-    PartDeltaEvent,
-    TextPartDelta,
-    ThinkingPartDelta,
-    ToolReturnPart,
-)
+from langgraph.graph import END, START, StateGraph
 
 from . import approvals as approval_store
 from . import compaction as compact_service
 from . import config as ai_config
+from . import model as ai_model
 from . import runs, tools
 from . import trace as trace_service
 from .session import conversations
@@ -96,6 +85,7 @@ def runtime_instructions(ctx: tools.Ctx) -> str:
         lines.append("该账号只有只读权限：不要承诺执行写操作，说明需要管理员来做。")
     return "\n".join(lines)
 
+
 #: 这些工具本来就慢，超时按安装/恢复的量级给。
 SLOW_TOOLS = {
     "install_project",
@@ -123,72 +113,295 @@ def _timeout_for(spec: tools.ToolSpec) -> float:
     return 60.0
 
 
-def _compress_history(messages: list[Any]) -> list[Any]:
-    """压缩旧的工具返回，保留消息顺序和 tool_call/tool_return 配对。
+# ------------------------------------------------------------------ history
+def _tool_text(message: dict[str, Any]) -> str:
+    content = message.get("content", "")
+    return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
 
-    只改“发给模型”的副本，存下来的历史原封不动（对齐 ProcessHistory 的语义）。
-    截断后模型仍能知道工具做过什么，但不会把几千行日志反复带进上下文。
+
+def _compress_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """压缩旧的工具返回，保留消息顺序和 tool_call/tool 配对。
+
+    只改“发给模型”的副本，存下来的历史原封不动。截断后模型仍能知道工具做过
+    什么，但不会把几千行日志反复带进上下文。
     """
     cutoff = max(0, len(messages) - HISTORY_KEEP_RECENT)
-    out: list[Any] = []
-    for index, message in enumerate(messages[:cutoff]):
-        parts = list(getattr(message, "parts", ()))
-        if not parts:
+    out: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        if index >= cutoff or message.get("role") != "tool":
             out.append(message)
             continue
-        changed = False
-        for i, part in enumerate(parts):
-            if not isinstance(part, ToolReturnPart):
-                continue
-            content = part.content
-            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
-            if len(text) > HISTORY_RESULT_CHARS:
-                parts[i] = replace(
-                    part,
-                    content=text[:HISTORY_RESULT_CHARS] + f"...（已压缩，原文 {len(text)} 字符）",
-                )
-                changed = True
-        out.append(replace(message, parts=parts) if changed else message)
-    out.extend(messages[cutoff:])
+        text = _tool_text(message)
+        if len(text) <= HISTORY_RESULT_CHARS:
+            out.append(message)
+            continue
+        copied = dict(message)
+        copied["content"] = text[:HISTORY_RESULT_CHARS] + f"...（已压缩，原文 {len(text)} 字符）"
+        out.append(copied)
     return out
 
 
-def build_agent(cfg: ai_config.AiConfig) -> Agent:
-    model = ai_config.build_model(cfg)
-    need_approval = not cfg.auto_approve
-    # 显式 takes_ctx=False：工具通过 ContextVar 拿身份，签名里没有 RunContext。
-    # 让 pydantic-ai 去猜的话，带参数的函数会被误判成“上下文工具”而报错。
-    toolset = [
-        Tool(
-            spec.fn,
-            name=spec.name,
-            description=(inspect.getdoc(spec.fn) or spec.summary).strip(),
-            takes_ctx=False,
-            requires_approval=spec.dangerous and need_approval,
-            # 工具超时由框架计时；卡在 RCON / 下载 / 文件锁上时不会再拖死整轮。
-            timeout=_timeout_for(spec),
+def _sanitize_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """裁掉“有 tool_calls 但没有对应返回”的 assistant 及其后消息。
+
+    取消/步数上限/审批挂起都可能把悬空调用留在历史里；带着它们开新话题，
+    OpenAI 兼容端点会直接 400。安全切点就是这条 assistant 之前。
+    """
+    answered = {m.get("tool_call_id") for m in messages if m.get("role") == "tool"}
+    for index, message in enumerate(messages):
+        if message.get("role") != "assistant":
+            continue
+        calls = message.get("tool_calls") or []
+        if any(call.get("id") not in answered for call in calls):
+            return messages[:index]
+    return messages
+
+
+# -------------------------------------------------------------------- schema
+_JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean", dict: "object", list: "array"}
+
+
+def _json_type(annotation: Any) -> str:
+    origin = getattr(annotation, "__origin__", None)
+    if origin in (list, set, frozenset, tuple):
+        return "array"
+    if origin is dict:
+        return "object"
+    args = getattr(annotation, "__args__", None)
+    if args:  # Optional[X] / X | Y：取第一个非 None 类型
+        for arg in args:
+            if arg is not type(None):
+                return _json_type(arg)
+    return _JSON_TYPES.get(annotation, "string")
+
+
+def _tool_schemas() -> list[dict[str, Any]]:
+    """从注册表生成 OpenAI function-calling 的 tools 定义。
+
+    包装层用 ``__signature__`` 保留了原函数签名；``tools.py`` 开了
+    ``from __future__ import annotations``，注解是字符串，必须过
+    ``get_type_hints`` 还原成真实类型再映射 JSON 类型。
+    """
+    out: list[dict[str, Any]] = []
+    for spec in tools.TOOLS.values():
+        original = getattr(spec.fn, "__wrapped__", spec.fn)
+        try:
+            hints = typing.get_type_hints(original)
+        except Exception:  # noqa: BLE001 - 解析不了就退回按名映射
+            hints = {}
+        signature = inspect.signature(spec.fn)
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for name, param in signature.parameters.items():
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            annotation = hints.get(name, param.annotation)
+            entry: dict[str, Any] = {"type": _json_type(annotation)}
+            if param.default is not param.empty:
+                if param.default is not None:
+                    entry["default"] = param.default
+            else:
+                required.append(name)
+            properties[name] = entry
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": spec.name,
+                    "description": (inspect.getdoc(spec.fn) or spec.summary).strip(),
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            }
         )
-        for spec in tools.TOOLS.values()
-    ]
-    return Agent(
-        model,
-        # 一旦有工具需要审批，run 的返回值可能是 DeferredToolRequests 而不是文本，
-        # 所以输出类型必须同时声明这两种。
-        output_type=[str, DeferredToolRequests],
-        instructions=INSTRUCTIONS,
-        tools=toolset,
-        tool_timeout=180.0,
-        capabilities=[ProcessHistory(_compress_history)],
-    )
+    return out
+
+
+# -------------------------------------------------------------------- graph
+class GraphState(TypedDict, total=False):
+    messages: Annotated[list[dict[str, Any]], operator.add]
+    turns: int
+    approvals: dict[str, bool]
+    pending: list[dict[str, Any]]
+    tool_results: list[dict[str, Any]]
+    usage: dict[str, int]
+    limit_hit: bool
+    resume: bool
 
 
 @dataclass
-class Turn:
-    """一次 run 的最终产物。"""
+class LoopConfig:
+    """图的运行期依赖。usage 在 agent 节点里跨轮累加（每次请求的用量求和）。"""
 
-    text: str = ""
-    pending: list[dict[str, Any]] | None = None
-    usage: dict[str, Any] | None = None
+    model: Any
+    tool_defs: list[dict[str, Any]]
+    instructions: str
+    max_turns: int
+    need_approval: bool
+    trace_run_id: str | None = None
+    usage: dict[str, int] | None = None
+
+    def __post_init__(self) -> None:
+        if self.usage is None:
+            self.usage = {}
+
+
+def _unresolved_calls(state: GraphState) -> list[dict[str, Any]]:
+    """最后一条 assistant 消息里尚未有对应 tool 返回的调用。"""
+    messages = state.get("messages") or []
+    answered = {m.get("tool_call_id") for m in messages if m.get("role") == "tool"}
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            break
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            return [c for c in message["tool_calls"] if c.get("id") not in answered]
+    return []
+
+
+def _usage_of(response: Any) -> dict[str, int] | None:
+    raw = getattr(response, "usage_metadata", None) or {}
+    if not raw:
+        return None
+    return {
+        "requests": 1,
+        "input_tokens": int(raw.get("input_tokens") or 0),
+        "output_tokens": int(raw.get("output_tokens") or 0),
+        "total_tokens": int(raw.get("total_tokens") or 0),
+    }
+
+
+def _merge_usage(base: dict[str, int] | None, extra: dict[str, int] | None) -> dict[str, int]:
+    out = dict(base or {})
+    for key, value in (extra or {}).items():
+        out[key] = out.get(key, 0) + value
+    return out
+
+
+def build_graph(loop: LoopConfig):
+    async def agent_node(state: GraphState) -> dict[str, Any]:
+        history = _compress_history(state.get("messages") or [])
+        call_messages = [{"role": "system", "content": loop.instructions}, *history]
+        bound = loop.model.bind_tools(loop.tool_defs)
+        step = trace_service.traces.add_step(loop.trace_run_id, "model", "模型输出")
+        chunk: Any = None
+        try:
+            # 用 astream 而不是 ainvoke：stream_mode="messages" 靠逐 token 回调
+            # 把 thinking/text 增量实时推给前端。
+            async for piece in bound.astream(call_messages):
+                chunk = piece if chunk is None else chunk + piece
+        finally:
+            if step is not None:
+                content = getattr(chunk, "content", "") or ""
+                trace_service.traces.finish_step(
+                    loop.trace_run_id,
+                    step.seq,
+                    detail=f"输出 {len(content) if isinstance(content, str) else 0} 字",
+                )
+        if chunk is None:
+            raise RuntimeError("模型没有返回任何内容")
+        message: dict[str, Any] = {"role": "assistant", "content": str(chunk.content or "")}
+        thinking = ai_model.message_thinking(chunk)
+        if thinking:
+            message["thinking"] = thinking
+        tool_calls: list[dict[str, Any]] = []
+        for call in getattr(chunk, "tool_calls", None) or []:
+            args = call.get("args")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {"_raw": args}
+            tool_calls.append(
+                {
+                    "id": call.get("id") or f"call_{len(tool_calls)}",
+                    "name": call.get("name") or "",
+                    "args": args or {},
+                }
+            )
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        turns = int(state.get("turns") or 0) + 1
+        loop.usage = _merge_usage(loop.usage, _usage_of(chunk))
+        limit_hit = bool(tool_calls) and turns >= loop.max_turns
+        return {"messages": [message], "turns": turns, "usage": dict(loop.usage), "limit_hit": limit_hit}
+
+    async def _execute(spec: tools.ToolSpec | None, name: str, args: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if spec is None:
+            return 0, {"ok": False, "error": f"不存在工具 {name}"}
+        limit = _timeout_for(spec)
+        started = time.perf_counter()
+        try:
+            async with asyncio.timeout(limit):
+                result = await spec.fn(**args)
+        except TimeoutError:
+            return int((time.perf_counter() - started) * 1000), {"ok": False, "error": f"工具执行超时（{limit:.0f}s）"}
+        except Exception as exc:  # noqa: BLE001 - 参数错误也要变成工具返回值，交还给模型
+            return int((time.perf_counter() - started) * 1000), {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        payload = result if isinstance(result, dict) else {"result": result}
+        return int((time.perf_counter() - started) * 1000), payload
+
+    async def tools_node(state: GraphState) -> dict[str, Any]:
+        pending: list[dict[str, Any]] = []
+        tool_messages: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        approvals = state.get("approvals") or {}
+        for call in _unresolved_calls(state):
+            name, call_id, args = call.get("name", ""), call.get("id", ""), call.get("args") or {}
+            spec = tools.TOOLS.get(name)
+            decision = approvals.get(call_id)
+            if spec is not None and spec.dangerous and loop.need_approval and decision is None:
+                pending.append({"id": call_id, "name": name, "args": args, "summary": spec.summary[:600]})
+                continue
+            if decision is False:
+                duration, payload = 0, {"ok": False, "error": "用户拒绝执行"}
+            else:
+                duration, payload = await _execute(spec, name, args)
+            failed = payload.get("ok") is False
+            text = json.dumps(payload, ensure_ascii=False, default=str)
+            tool_messages.append({"role": "tool", "tool_call_id": call_id, "name": name, "content": text})
+            results.append(
+                {
+                    "id": call_id,
+                    "name": name,
+                    "preview": _preview(text),
+                    "failed": failed,
+                    "duration_ms": duration,
+                    "content": payload,
+                }
+            )
+        update: dict[str, Any] = {"pending": pending, "tool_results": results}
+        if tool_messages:
+            update["messages"] = tool_messages
+        return update
+
+    def route_start(state: GraphState) -> str:
+        # 审批续跑：历史末尾挂着待决调用，直接进 tools 落地，不再问一次模型。
+        return "tools" if state.get("resume") else "agent"
+
+    def route_after_agent(state: GraphState) -> str:
+        if state.get("limit_hit"):
+            return END
+        return "tools" if _unresolved_calls(state) else END
+
+    def route_after_tools(state: GraphState) -> str:
+        return END if state.get("pending") else "agent"
+
+    builder = StateGraph(GraphState)
+    builder.add_node("agent", agent_node)
+    builder.add_node("tools", tools_node)
+    builder.add_conditional_edges(START, route_start, {"agent": "agent", "tools": "tools"})
+    builder.add_conditional_edges("agent", route_after_agent, {"tools": "tools", END: END})
+    builder.add_conditional_edges("tools", route_after_tools, {"agent": "agent", END: END})
+    return builder.compile()
+
+
+# ------------------------------------------------------------------ helpers
+def _preview(content: Any, limit: int = 600) -> str:
+    text = content if isinstance(content, str) else str(content)
+    return text if len(text) <= limit else text[:limit] + " ..."
 
 
 def _jsonable(value: Any) -> Any:
@@ -201,37 +414,7 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-def _tool_args(value: Any) -> Any:
-    """工具参数可能是原始 JSON 字符串（流式拼接的结果），解成对象再给前端。"""
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except ValueError:
-            return value
-    return _jsonable(value)
-
-
-def _preview(content: Any, limit: int = 600) -> str:
-    text = content if isinstance(content, str) else str(content)
-    return text if len(text) <= limit else text[:limit] + " ..."
-
-
-def _result_text(content: Any) -> tuple[str, bool]:
-    """把工具返回值整理成「给人看的 JSON」并判断成败。
-
-    工具统一返回 dict，但 pydantic-ai 交给我们的是 Python 对象；直接 str()
-    会得到单引号的 repr，前端当 JSON 显示时很别扭。
-    """
-    if isinstance(content, dict):
-        failed = content.get("ok") is False
-        try:
-            return json.dumps(content, ensure_ascii=False), failed
-        except (TypeError, ValueError):
-            return str(content), failed
-    text = str(content)
-    return text, '"ok": false' in text or "'ok': False" in text
-
-
+# -------------------------------------------------------------------- turn
 async def stream_turn(
     *,
     prompt: str | None,
@@ -239,15 +422,15 @@ async def stream_turn(
     ctx: tools.Ctx,
     cfg: ai_config.AiConfig,
     approvals: dict[str, bool] | None = None,
-    cancellation_token: CancellationToken | None = None,
+    cancellation_token: runs.CancellationToken | None = None,
     run_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """跑一轮对话，逐条吐出事件。
 
-    ``approvals`` 不为 None 时表示这是“用户点了确认之后”的续跑：此时不能再给
-    新的用户提问（pydantic-ai 会直接报 unprocessed tool calls），只能带审批结果。
+    ``approvals`` 不为 None 时表示这是“用户点了确认之后”的续跑：历史末尾挂着
+    未决的工具调用，图直接从 tools 节点入，把批准/拒绝落地后继续问模型。
 
-    ``cancellation_token`` 由 HTTP 层预先注册：这样即使流还没开始消费，用户点
+    ``cancellation_token`` 由 HTTP 层预先注册：即使流还没开始消费，用户点
     “停止”也能把 run 取消掉。
 
     ``run_id`` 由 HTTP 层生成，用来把一次提问及其审批续跑串成同一条可回看的轨迹；
@@ -258,7 +441,7 @@ async def stream_turn(
         return
 
     try:
-        agent = build_agent(cfg)
+        chat_model = ai_config.build_model(cfg)
     except ai_config.AiConfigError as exc:
         yield {"type": "error", "message": str(exc)}
         return
@@ -275,8 +458,7 @@ async def stream_turn(
                     step.status = "done"
                     step.duration_ms = max(0, int((time.perf_counter() - step._perf) * 1000))
 
-    # 每个事件都带同一 run_id + 递增 seq + 毫秒时间戳，前端据此重建时间线；
-    # 服务端独立计时，不依赖浏览器收到事件的先后。
+    # 每个事件都带同一 run_id + 递增 seq + 毫秒时间戳，前端据此重建时间线。
     seq = 0
 
     def emit(kind: str, **payload: Any) -> dict[str, Any]:
@@ -284,33 +466,12 @@ async def stream_turn(
         seq += 1
         return {"type": kind, "run_id": run_id, "seq": seq, "ts": int(time.time() * 1000), **payload}
 
-    # 当前“模型推理/输出”阶段对应的步骤 seq；工具调用会先收尾它，工具返回后再开新的。
-    model_seq: int | None = None
-    model_chars = 0
-    tool_seqs: dict[str, int] = {}
-    final_status = "error"
-    usage: dict[str, Any] | None = None
-
-    def open_model_step() -> None:
-        nonlocal model_seq
-        if model_seq is None:
-            step = trace_service.traces.add_step(run_id, "model", cfg.model)
-            if step is not None:
-                model_seq = step.seq
-
-    def close_model_step() -> None:
-        nonlocal model_seq
-        if model_seq is not None:
-            trace_service.traces.finish_step(
-                run_id,
-                model_seq,
-                detail=f"推理/输出 {model_chars} 字" if model_chars else "",
-            )
-            model_seq = None
-
     history = conversations.get(conversation_id) or []
-    # 只在用户新提问时压缩：审批续跑必须原样带着上一轮未处理的工具调用。
-    if prompt is not None and compact_service.needs_compaction(history):
+    if approvals is None:
+        # 新提问前先裁掉上一轮没跑完的悬空工具调用，否则 OpenAI 端点会 400。
+        history = _sanitize_history(history)
+    # 只在用户新提问时压缩：审批续跑必须原样带着上一轮未处理完的工具调用。
+    if approvals is None and compact_service.needs_compaction(history):
         history, info = await compact_service.compact(history, cfg)
         if info["compacted"]:
             old_count = (conversations.meta(conversation_id) or {}).get("compactions", 0)
@@ -335,165 +496,186 @@ async def stream_turn(
                 model=info["model"],
             )
 
-    kwargs: dict[str, Any] = {
-        "message_history": history,
-        "usage_limits": UsageLimits(request_limit=max(2, cfg.max_steps)),
-        "cancellation_token": cancellation_token,
-        # 静态指令保持前缀稳定（利于 provider 缓存），运行时信息每轮单独追加。
-        "instructions": runtime_instructions(ctx),
+    input_state: GraphState = {
+        "messages": list(history),
+        "turns": 0,
+        "approvals": dict(approvals or {}),
+        "resume": approvals is not None,
     }
-    if approvals is not None:
-        kwargs["deferred_tool_results"] = DeferredToolResults(approvals=dict(approvals))
-        user_prompt = None
-    else:
-        user_prompt = prompt or ""
+    if prompt is not None:
+        input_state["messages"].append({"role": "user", "content": prompt})
+
+    loop = LoopConfig(
+        model=chat_model,
+        tool_defs=_tool_schemas(),
+        instructions=f"{INSTRUCTIONS}\n\n{runtime_instructions(ctx)}",
+        max_turns=max(2, cfg.max_steps),
+        need_approval=not cfg.auto_approve,
+        trace_run_id=run_id,
+    )
+    graph = build_graph(loop)
+
+    # 图外泵事件：同步累积最终历史（取消时保留已完成部分），并把 trace 步骤
+    # 与 SSE 事件一一对应。图节点里不能 yield，所有前端可见事件都在这里发。
+    out_messages: list[dict[str, Any]] = list(input_state["messages"])
+    tool_seqs: dict[str, int] = {}
+    final_text = ""
+    pending: list[dict[str, Any]] | None = None
+    usage: dict[str, Any] | None = None
+    limit_hit = False
+    final_status = "error"
+    cancelled = False
 
     ctx_token = tools.set_ctx(ctx)
-    final: Turn | None = None
-    pending: list[dict[str, Any]] | None = None
-    captured: list[Any] = []
-    saved = False
     # 让前端尽早从“连接中”切到“思考中”。模型首字节可能要好几秒（尤其推理模型），
     # 不能让这段时间在界面上是空白的。
-    open_model_step()
     yield emit("started", model=cfg.model)
+    stream = graph.astream(
+        input_state,
+        {"recursion_limit": max(8, loop.max_turns * 3)},
+        stream_mode=["messages", "updates"],
+    )
     try:
-        # 进入 agent 上下文：pydantic-ai 会在这里复用并在退出时关闭 provider 的
-        # HTTP client。旧实现每次 run 都新建 Agent 却不关 client，长跑会泄漏连接。
-        # 同步的 capture 与两个 async with 不能合并成一个语句；故意保留嵌套。
-        with capture_run_messages() as captured:
-            async with agent:  # noqa: SIM117 - 三个上下文类型不同，无法合并
-                async with agent.run_stream_events(user_prompt, **kwargs) as events:
-                    async for event in events:
-                        if isinstance(event, PartDeltaEvent) and isinstance(event.delta, ThinkingPartDelta):
-                            # 推理模型的思考增量（DeepSeek-R1 / qwen3 / o 系列经兼容层）。
-                            # 前端用灰色折叠区实时呈现，用户能立刻看到“它在想”。
-                            delta = event.delta.content_delta
-                            if delta:
-                                model_chars += len(delta)
-                                yield emit("thinking", delta=delta)
-                        elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-                            delta = event.delta.content_delta
-                            if delta:
-                                model_chars += len(delta)
-                                yield emit("text", delta=delta)
-                        elif isinstance(event, FunctionToolCallEvent):
-                            part = event.part
-                            close_model_step()
-                            args = _tool_args(part.args)
-                            spec = tools.TOOLS.get(part.tool_name)
-                            step = trace_service.traces.add_step(
+        while True:
+            # LangGraph 没有内建取消：每个图事件与 token 的 event 竞速。
+            # 模型请求本身有 180s 超时（config 层），不会永远卡住。
+            nxt = asyncio.ensure_future(stream.__anext__())
+            waiter = asyncio.ensure_future(cancellation_token._event.wait()) if cancellation_token else None
+            try:
+                await asyncio.wait({nxt, waiter} if waiter else {nxt}, return_when=asyncio.FIRST_COMPLETED)
+                if waiter is not None and waiter.done():
+                    cancelled = True
+                    break
+                error = nxt.exception()
+                if isinstance(error, StopAsyncIteration):
+                    break
+                if error is not None:
+                    raise error  # noqa: TRY301
+                mode, payload = nxt.result()
+            finally:
+                nxt.cancel()
+                if waiter is not None:
+                    waiter.cancel()
+
+            if mode == "messages":
+                chunk, meta = payload
+                if meta.get("langgraph_node") != "agent":
+                    continue
+                thinking = ai_model.message_thinking(chunk)
+                if thinking:
+                    yield emit("thinking", delta=thinking)
+                delta = chunk.content if isinstance(chunk.content, str) else ""
+                if delta:
+                    yield emit("text", delta=delta)
+                continue
+
+            # updates 模式：每节点跑完给一份增量。
+            for node, update in payload.items():
+                for message in update.get("messages") or []:
+                    out_messages.append(message)
+                if update.get("usage") is not None:
+                    usage = update["usage"]
+                if update.get("limit_hit"):
+                    limit_hit = True
+                if node == "agent":
+                    message = (update.get("messages") or [{}])[-1]
+                    if str(message.get("content", "")).strip():
+                        final_text = str(message["content"])
+                    for call in message.get("tool_calls") or []:
+                        spec = tools.TOOLS.get(call.get("name", ""))
+                        step = trace_service.traces.add_step(
+                            run_id,
+                            "tool",
+                            call.get("name", ""),
+                            args=call.get("args") or {},
+                            detail=(spec.summary if spec else "")[:600],
+                        )
+                        if step is not None:
+                            tool_seqs[call["id"]] = step.seq
+                        yield emit(
+                            "tool_call",
+                            id=call["id"],
+                            name=call["name"],
+                            args=call.get("args") or {},
+                            dangerous=bool(spec and spec.dangerous),
+                            step=step.seq if step else None,
+                        )
+                elif node == "tools":
+                    for item in update.get("tool_results") or []:
+                        step_seq = tool_seqs.pop(item["id"], None)
+                        duration = trace_service.traces.finish_step(
+                            run_id,
+                            step_seq,
+                            status="failed" if item["failed"] else "done",
+                            result=item["preview"],
+                        )
+                        yield emit(
+                            "tool_result",
+                            id=item["id"],
+                            name=item["name"],
+                            preview=item["preview"],
+                            failed=item["failed"],
+                            duration_ms=duration if duration is not None else item["duration_ms"],
+                            step=step_seq,
+                        )
+                        if item["name"] == "update_plan" and not item["failed"]:
+                            payload_obj = _jsonable(item["content"])
+                            plan = payload_obj.get("plan", payload_obj) if isinstance(payload_obj, dict) else payload_obj
+                            trace_service.traces.add_step(
                                 run_id,
-                                "tool",
-                                part.tool_name,
-                                args=args,
-                                detail=(spec.summary if spec else "")[:600],
+                                "plan",
+                                "更新任务清单",
+                                status="done",
+                                result=_preview(json.dumps(plan, ensure_ascii=False), 1200),
                             )
-                            if step is not None:
-                                tool_seqs[part.tool_call_id] = step.seq
-                            yield emit(
-                                "tool_call",
-                                id=part.tool_call_id,
-                                name=part.tool_name,
-                                args=args,
-                                dangerous=bool(spec and spec.dangerous),
-                                step=step.seq if step else None,
-                            )
-                        elif isinstance(event, FunctionToolResultEvent):
-                            part = event.part
-                            text, failed = _result_text(part.content)
-                            step_seq = tool_seqs.pop(part.tool_call_id, None)
-                            duration = trace_service.traces.finish_step(
-                                run_id,
-                                step_seq,
-                                status="failed" if failed else "done",
-                                result=text[:2000],
-                            )
-                            yield emit(
-                                "tool_result",
-                                id=part.tool_call_id,
-                                name=part.tool_name,
-                                preview=_preview(text),
-                                failed=failed,
-                                duration_ms=duration,
-                                step=step_seq,
-                            )
-                            # 结果交回模型后，开启下一轮推理阶段。
-                            open_model_step()
-                            if part.tool_name == "update_plan" and not failed:
-                                payload = _jsonable(part.content)
-                                plan = payload.get("plan", payload)
-                                trace_service.traces.add_step(
-                                    run_id,
-                                    "plan",
-                                    "更新任务清单",
-                                    status="done",
-                                    result=_preview(json.dumps(plan, ensure_ascii=False), 1200),
-                                )
-                                yield emit("plan", plan=plan)
-                        elif isinstance(event, DeferredToolRequestsEvent):
-                            requests = event.requests
-                            items = [
-                                {
-                                    "id": call.tool_call_id,
-                                    "name": call.tool_name,
-                                    "args": _tool_args(call.args),
-                                    "summary": (tools.TOOLS[call.tool_name].summary if call.tool_name in tools.TOOLS else ""),
-                                }
-                                for call in requests.approvals
-                            ]
-                            if items:
-                                pending = items
-                                approval_store.approvals.remember(conversation_id, items)
-                                close_model_step()
-                                trace_service.traces.add_step(
-                                    run_id,
-                                    "approval",
-                                    "等待人工确认",
-                                    status="waiting",
-                                    args=[{"name": i["name"], "args": i["args"]} for i in items],
-                                    detail=f"{len(items)} 个工具需要确认",
-                                )
-                                yield emit("approval_required", items=items)
-                        elif isinstance(event, AgentRunResultEvent):
-                            result = event.result
-                            output = result.output
-                            usage = _jsonable(dict(result.usage.__dict__)) if hasattr(result.usage, "__dict__") else None
-                            final = Turn(text=output if isinstance(output, str) else "", usage=usage)
-                            conversations.put(conversation_id, result.all_messages())
-                            saved = True
-                            # 有任何待确认工具时是“暂停等确认”，不是完成。
-                            final_status = "waiting_approval" if pending else "done"
-    except RunCancelled:
-        # 取消时保留已完成的部分：下一次提问不会从“半截工具调用”开始。
-        if captured and not saved:
-            conversations.put(conversation_id, captured)
-        final_status = "cancelled"
-        yield emit("cancelled", message="已停止；已完成的操作保留在对话里")
-        return
+                            yield emit("plan", plan=plan)
+                    items = update.get("pending") or []
+                    if items:
+                        pending = items
+                        approval_store.approvals.remember(conversation_id, items)
+                        trace_service.traces.add_step(
+                            run_id,
+                            "approval",
+                            "等待人工确认",
+                            status="waiting",
+                            args=[{"name": i["name"], "args": i["args"]} for i in items],
+                            detail=f"{len(items)} 个工具需要确认",
+                        )
+                        final_status = "waiting_approval"
+                        yield emit("approval_required", items=items)
+        if cancelled:
+            # 取消时保留已完成的部分：下一次提问不会从“半截工具调用”开始。
+            conversations.put(conversation_id, out_messages)
+            final_status = "cancelled"
+            yield emit("cancelled", message="已停止；已完成的操作保留在对话里")
+            return
+        # 图正常跑完：把初始 error 翻成 done；待确认/步数上限保持原值。
+        if final_status == "error" and not limit_hit:
+            final_status = "done"
     except asyncio.CancelledError:  # pragma: no cover - 客户端直接断开
-        if captured and not saved:
-            conversations.put(conversation_id, captured)
+        if out_messages:
+            conversations.put(conversation_id, out_messages)
+        final_status = "cancelled"
         raise
     except Exception as exc:  # noqa: BLE001 - 模型/网络错误要变成可读信息
         log.warning("AI 对话失败: %s", exc)
         yield emit("error", message=f"{type(exc).__name__}: {exc}")
         return
     finally:
-        close_model_step()
         trace_service.traces.finish(run_id, final_status, usage=usage)
         tools.reset_ctx(ctx_token)
         if cancellation_token is not None:
             runs.runs.finish(conversation_id, cancellation_token)
 
-    if final is None:
-        yield emit("error", message="模型没有返回结果")
+    # 正常/待确认收尾：写回会话历史（含本轮所有消息）。
+    conversations.put(conversation_id, out_messages)
+    if limit_hit and final_status != "waiting_approval":
+        yield emit("error", message=f"已达到最大工具往返步数（{loop.max_turns}），任务未完成，可继续追问")
         return
-
     yield emit(
         "done",
-        text=final.text,
-        usage=final.usage,
+        text=final_text,
+        usage=usage,
         pending=pending,
         status=final_status,
     )

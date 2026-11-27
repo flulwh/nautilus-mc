@@ -160,16 +160,17 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 - **模型列表直接拉**：点「获取模型列表」从端点的 `/v1/models` 读出模型名；选「本地 Ollama」预设会自动拉一次，
   并额外读原生 `/api/tags` 补上参数量、量化等级和体积，不用再手抄 `qwen2.5:7b` 这种名字。
   端点填根地址或 `.../v1` 都行；本机/容器地址的 Ollama 不需要 API Key。
-- **agent 循环**：用 [Pydantic AI](https://github.com/pydantic/pydantic-ai)（Pydantic 官方，MIT），
-  不自己写 tool-calling 状态机；工具声明为普通 async 函数，schema 由签名生成。
+- **agent 循环**：用 [LangGraph](https://github.com/langchain-ai/langgraph)（MIT，langgraph.com.cn 有中文文档）
+  跑「模型 ⇄ 工具」react 状态图；工具声明为普通 async 函数，schema 由签名生成。
+  对话历史刻意保持纯 dict（OpenAI 风格），不与框架对象耦合，为将来的持久化留好路。
 - **任务清单与运维手册**：多步任务用 `update_plan` 显式列步骤，前端实时显示进度；
   6 份运维手册（启动失败、装插件、备份恢复、玩家、世界、卡顿）按需 `load_playbook` 加载，
   对应 Claude Agent SDK 的 Skills 渐进披露与 Claude Code 的 TodoWrite 模式。
-- **能真正停下来**：浏览器上的「停止」会调 `POST /api/ai/cancel`，通过 pydantic-ai 的
-  `CancellationToken` 取消 run 本身；已经完成的工具调用保留在对话里，不会重复执行。
+- **能真正停下来**：浏览器上的「停止」会调 `POST /api/ai/cancel`，取消信号与图事件循环竞速，
+  直接中断 agent run 本身；已经完成的工具调用保留在对话里，不会重复执行。
 - **多会话**：左侧列出历史会话，可新建、切换、重命名、删除；切回去会把工具调用和回答一起还原。
   每个会话按登录用户隔离，标题自动取第一句提问。
-- **上下文压缩**：发给模型的旧工具结果先压到 700 字符（`ProcessHistory`）；历史再长就自动
+- **上下文压缩**：发给模型的旧工具结果先压到 700 字符；历史再长就自动
   用同一个模型把旧轮次摘要化，从用户提问边界开始裁剪，最近 10 轮保持原文。也可以点
   「压缩上下文」手动触发（`POST .../compact`，支持 focus）。压缩过程会发 SSE `compacted` 事件。
 - **工具超时**：只读工具 60s、写操作 120s、安装/恢复 300s，卡住不会拖死整轮。
@@ -479,12 +480,12 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 | 插件市场 | Modrinth API / Hangar API | 覆盖 99% 生态，且提供哈希 |
 | 扩展机制 | `pluggy` | pytest 同款，语义稳定 |
 | 前端 | React + Mantine + xterm + uPlot | 控制台与曲线是最吃性能的两块，直接用成熟组件 |
-| AI agent | `pydantic-ai` 2.71 | 模型往返、工具执行、流式增量、人工审批（`requires_approval`）都是现成的；本轮进一步用它的 `CancellationToken` / `ProcessHistory` / `tool_timeout` / `capture_run_messages` 做运行控制 |
+| AI agent | `langgraph` 1.2 + `langchain-openai` 1.8 | react 状态图（agent ⇄ tools）、messages/updates 双流式；人工审批不依赖 checkpointer，待确认集合独立存储、确认后重新入图续跑 |
 | 多步任务与手册 | Claude Code TodoWrite + Claude Agent SDK Skills | 清单显式化进度；手册只在需要时加载，避免把 36 个工具的细节全塞进 system prompt |
 | 多会话与命名 | Claude Code `--resume` / `/rename` | 会话像分支：不同任务分开，标题可改，切换时回放历史 |
 | 上下文压缩 | Claude Code `/compact <focus>` + LangGraph 摘要式记忆 | 先摘要旧轮次再裁剪，切点必须落在用户提问上；模型摘要失败有确定性兜底 |
-| 提示词与反馈 | pydantic-ai 动态 instructions + Vercel AI SDK 的 status 状态机 | 静态指令保持稳定前缀、运行时注入时间/角色；前端区分连接中/生成中/出错，工具调用有阶段和耗时 |
-| 审批中断语义 | LangGraph `interrupt()` / `Command(resume=...)` | 待确认调用一次性有效、带 TTL，过期或重复点击不再执行 |
+| 提示词与反馈 | LangGraph 动态 instructions + Vercel AI SDK 的 status 状态机 | 静态指令保持稳定前缀、运行时注入时间/角色；前端区分连接中/生成中/出错，工具调用有阶段和耗时 |
+| 审批中断语义 | LangGraph 图路由（pending → END）| 不用 interrupt/checkpointer：待确认调用一次性有效、带 TTL，过期或重复点击不再执行 |
 | 模型接入 | OpenAI 兼容协议 | 国内主流厂商与 Ollama 都遵守，一个 provider 通吃，不必按厂商分支 |
 | 模型发现 | Ollama `/api/tags` + OpenAI `/v1/models` | 通用接口拿名单，原生接口补参数量/量化；两种地址写法都能识别 |
 | MCP | 官方 `mcp` SDK | 让 Claude Desktop / Cursor 等外部 agent 复用同一批工具 |
@@ -537,7 +538,7 @@ start.bat start.sh  # Windows 与 Linux/macOS 的薄入口
 [Alembic](https://alembic.sqlalchemy.org/)、[APScheduler](https://github.com/agronholm/apscheduler)、[pluggy](https://github.com/pytest-dev/pluggy)、
 [psutil](https://github.com/giampaolo/psutil)、[mcstatus](https://github.com/py-mine/mcstatus)、[async-mcrcon](https://github.com/kevinlindev/async-mcrcon)、
 [Mantine](https://mantine.dev/)、[xterm.js](https://xtermjs.org/)、[uPlot](https://github.com/leeoniya/uPlot)、
-[pydantic-ai](https://github.com/pydantic/pydantic-ai) 的 agent/工具/审批模型、
+[LangGraph](https://github.com/langchain-ai/langgraph) 的 agent 图与流式执行、
 [openai-agents-python](https://github.com/openai/openai-agents-python) 的 agent loop 与 max_turns 约束、
 [langgraph](https://github.com/langchain-ai/langgraph) 的 interrupt/resume 语义，
 以及 [itzg/mc-server-runner](https://github.com/itzg/mc-server-runner) 的停止阶梯设计。
