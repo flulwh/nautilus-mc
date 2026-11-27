@@ -216,6 +216,13 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 > Windows 上 push 可能报 `CRYPT_E_NO_REVOCATION_CHECK`，用
 > `git -c http.sslBackend=schannel -c http.schannelCheckRevoke=false push`
 > （该仓库 local config 已配好）。
+>
+> 若报 `Failed to connect to github.com:443` 但 `api.github.com` 正常 —— 是 `github.com`
+> 的 DNS 被污染（会解析到不可达 IP），不是仓库或凭据问题。排障顺序：
+> `nslookup github.com` 看解析结果 → 直连测几个 GitHub 前端 IP 的 443 端口 →
+> 起本地 CONNECT 隧道把主机名映射到可用 IP，然后
+> `git -c http.proxy=http://127.0.0.1:<port> push`。
+> TLS 仍是端到端，证书校验不受影响；不要为此关掉 `sslVerify`。
 
 ---
 
