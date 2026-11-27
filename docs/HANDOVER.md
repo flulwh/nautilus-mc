@@ -228,8 +228,8 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 
 ### 5.1 明确的待办
 
-1. **截图更新**：`docs/screenshots/` 里的图还是旧工业蓝主题拍的，UI 已改为 Codex
-   桌面端风格（暗色优先、无顶栏侧栏布局），需要重拍。
+（暂无——原「截图更新」待办已于 2026-11-28 完成，`docs/screenshots/` 全套 13 张已用
+Codex 设计令牌主题重拍，见 commit `d1374a6`。）
 
 ### 5.2 架构文档里已经列出的演进路线
 
