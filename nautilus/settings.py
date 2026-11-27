@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     max_log_lines: int = 2000
     metrics_interval: float = 3.0
     metrics_points: int = 600
+    #: How often Paper-family servers are polled for /tps over RCON.
+    tps_interval: float = 10.0
     stop_grace_seconds: int = 30
     #: How many whole-server archives to keep per server (oldest pruned first).
     backup_keep: int = 10

@@ -164,6 +164,28 @@ def test_console_parser():
     assert "exploded" in buf.last_error
 
 
+def test_tps_parser():
+    from nautilus.servers.logbus import parse_tps
+
+    paper = "TPS from last 1m, 5m, 10m: 19.8, 18.2, 17.0\nMemory: 814M / 2048M (39.75%)"
+    out = parse_tps(paper)
+    assert out["tps1"] == 19.8 and out["tps5"] == 18.2 and out["tps10"] == 17.0
+    assert out["mem_pct"] == 39.75
+    assert out["mspt"] is None
+
+    # Real 1.20.6+ Paper reply: colour codes and a 15-minute window.
+    modern = "§6TPS from last 1m, 5m, 15m: §a19.2§r, §a18.0§r, §a17.5\n"
+    out = parse_tps(modern)
+    assert out["tps1"] == 19.2 and out["tps5"] == 18.0 and out["tps10"] == 17.5
+
+    spigot = "This server is running CraftBukkit...\nMean tick time: 12.345ms\nTPS from last 1m, 5m, 10m: 20.0, 20.0, 20.0"
+    out = parse_tps(spigot)
+    assert out["mspt"] == 12.345
+    assert out["tps1"] == 20.0
+
+    assert parse_tps("Unknown or incomplete command") is None
+
+
 def test_command_builder():
     from nautilus.models import Server
     from nautilus.servers.manager import manager

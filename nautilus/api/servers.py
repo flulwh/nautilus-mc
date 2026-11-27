@@ -415,6 +415,13 @@ async def metrics(server_id: int, session: SessionDep, limit: int = Query(240, g
     return {"points": points, "interval": settings.metrics_interval, "state": rt.state}
 
 
+@router.get("/{server_id}/tps", dependencies=[Depends(require("server", "read"))])
+async def tps(server_id: int, session: SessionDep, limit: int = Query(240, ge=10, le=600)) -> dict:
+    await _get(session, server_id)
+    rt = manager.get(server_id)
+    return {"points": list(rt.tps)[-limit:], "interval": settings.tps_interval, "state": rt.state}
+
+
 # Player administration lives in ``api/players.py`` (whitelist / ops / bans).
 
 

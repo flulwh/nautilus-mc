@@ -7,7 +7,7 @@ export interface Series {
   label: string;
   color: string;
   unit?: string;
-  data: number[];
+  data: (number | null)[];
 }
 
 /** Thin uPlot wrapper: 60KB, canvas based, handles ~10k points without dropping frames. */

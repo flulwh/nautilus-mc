@@ -135,6 +135,7 @@ async def server_stream(ws: WebSocket, server_id: int) -> None:
         # A batch backfill, distinct from the single-sample ``metrics`` frames
         # pushed live below; conflating the two corrupted the chart series.
         {"t": "metrics_history", "points": list(rt.metrics)[-120:]},
+        {"t": "tps_history", "points": list(rt.tps)[-120:]},
     ]
     try:
         await _serve(ws, f"server:{server_id}", initial)

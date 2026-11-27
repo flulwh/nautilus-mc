@@ -114,6 +114,39 @@ async def test_jar_path_cannot_escape_server_dir(admin):
 async def test_unknown_server_logs_are_404(admin):
     assert (await admin.get("/api/servers/999999/logs")).status_code == 404
     assert (await admin.get("/api/servers/999999/metrics")).status_code == 404
+    assert (await admin.get("/api/servers/999999/tps")).status_code == 404
+
+
+async def test_tps_samples_only_paper_with_rcon(admin, monkeypatch):
+    """Gate check: only Paper-family + running servers get polled for /tps."""
+    from nautilus.servers import manager as mgr_mod
+
+    calls: list[str] = []
+
+    async def fake_send(self, server, command):
+        calls.append(f"{server.name}:{command}")
+        return "TPS from last 1m, 5m, 10m: 20.0, 20.0, 20.0"
+
+    monkeypatch.setattr(mgr_mod.ServerManager, "send", fake_send)
+
+    paper = await _make_server(admin, "tps-paper")
+    fabric = await _make_server(admin, "tps-fabric", kind="fabric")
+
+    runtimes = {}
+    for sid in (paper["id"], fabric["id"]):
+        rt = mgr_mod.Runtime(server_id=sid, state="running")
+        rt.proc = types.SimpleNamespace(returncode=None)
+        runtimes[sid] = rt
+    mgr_mod.manager._rt.update(runtimes)
+    try:
+        await mgr_mod.manager.sample_tps()
+        assert calls == ["tps-paper:tps"]
+        assert runtimes[paper["id"]].tps[-1]["tps1"] == 20.0
+        assert not runtimes[fabric["id"]].tps
+    finally:
+        for sid in runtimes:
+            mgr_mod.manager._rt.pop(sid, None)
+    assert (await admin.get("/api/servers/999999/tps")).status_code == 404
 
 
 # -------------------------------------------------------------------- files

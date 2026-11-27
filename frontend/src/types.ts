@@ -61,6 +61,15 @@ export interface MetricPoint {
   players: number;
 }
 
+export interface TpsPoint {
+  ts: number;
+  tps1: number | null;
+  tps5: number | null;
+  tps10: number | null;
+  mspt: number | null;
+  mem_pct: number | null;
+}
+
 export interface LogLine {
   line: string;
   ts: number;

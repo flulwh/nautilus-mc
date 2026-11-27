@@ -38,6 +38,7 @@ from ..settings import settings
 log = logging.getLogger("nautilus.java")
 
 ADOPTIUM = "https://api.adoptium.net/v3"
+TUNA = "https://mirrors.tuna.tsinghua.edu.cn/Adoptium"
 UA = "nautilus-mc/0.1 (+https://github.com/flulwh/nautilus-mc)"
 #: Majors offered in the UI. 25 is what the 26.x server series needs.
 MAJORS = [8, 11, 17, 21, 25]
@@ -188,6 +189,16 @@ def _platform() -> tuple[str, str]:
     return os_name, arch
 
 
+async def _mirror_link(c: httpx.AsyncClient, major: int, os_name: str, arch: str, name: str) -> str | None:
+    """Tsinghua mirrors Adoptium's release tree with identical file names."""
+    url = f"{TUNA}/{major}/jre/{arch}/{os_name}/{name}"
+    try:
+        r = await c.head(url)
+    except (httpx.HTTPError, OSError):
+        return None
+    return url if r.status_code == 200 else None
+
+
 async def _asset(major: int, os_name: str, arch: str) -> dict:
     url = f"{ADOPTIUM}/assets/latest/{major}/hotspot"
     params = {"os": os_name, "architecture": arch, "image_type": "jre", "vendor": "eclipse"}
@@ -264,24 +275,39 @@ async def download(major: int, progress=None) -> JavaRuntime:
     tmp = root / f".download-{major}-{os.getpid()}"
     tmp.mkdir(parents=True, exist_ok=True)
     archive = tmp / asset["name"]
-    digest = hashlib.sha256()
-    done = 0
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=180.0), follow_redirects=True, headers={"User-Agent": UA}
         ) as c:
-            async with c.stream("GET", asset["url"]) as r:
-                r.raise_for_status()
-                total = int(r.headers.get("content-length", "0") or asset["size"] or 0)
-                with archive.open("wb") as fh:
-                    async for chunk in r.aiter_bytes(256 * 1024):
-                        fh.write(chunk)
-                        digest.update(chunk)
-                        done += len(chunk)
-                        if progress:
-                            res = progress(done, total, f"下载 JRE {major}")
-                            if asyncio.iscoroutine(res):
-                                await res
+            # The API's own link redirects to GitHub releases, which are often
+            # unusable from mainland China; try the Tsinghua mirror first and
+            # fall back. Both carry the identical artifact (same file name).
+            mirror = await _mirror_link(c, major, os_name, arch, asset["name"])
+            urls = [u for u in (mirror, asset["url"]) if u]
+            last_exc: Exception | None = None
+            for attempt, url in enumerate(urls):
+                digest = hashlib.sha256()
+                done = 0
+                try:
+                    async with c.stream("GET", url) as r:
+                        r.raise_for_status()
+                        total = int(r.headers.get("content-length", "0") or asset["size"] or 0)
+                        with archive.open("wb") as fh:
+                            async for chunk in r.aiter_bytes(256 * 1024):
+                                fh.write(chunk)
+                                digest.update(chunk)
+                                done += len(chunk)
+                                if progress:
+                                    res = progress(done, total, f"下载 JRE {major}")
+                                    if asyncio.iscoroutine(res):
+                                        await res
+                    break
+                except (httpx.HTTPError, OSError) as exc:
+                    last_exc = exc
+                    if attempt + 1 < len(urls):
+                        log.warning("java download from %s failed (%s), trying fallback", url.split("/")[2], exc)
+            else:
+                raise JavaError(f"JRE 下载失败：{last_exc}")
         if asset["sha256"] and digest.hexdigest().lower() != asset["sha256"]:
             raise JavaError("JRE 校验失败（SHA-256 不匹配）")
         if not archive.exists() or archive.stat().st_size == 0:

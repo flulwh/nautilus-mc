@@ -22,6 +22,15 @@ _RE_LIST = re.compile(r"There are (\d+)(?: of a max of \d+)? players online")
 _RE_SEVERE = re.compile(r"\b(ERROR|SEVERE|FATAL)\b")
 _RE_WARN = re.compile(r"\bWARN(?:ING)?\b")
 
+# ``/tps`` on Paper-family servers (and Spigot-derived ones, which add a
+# "Mean tick time" line) answers with plain text over RCON. Modern Paper
+# (1.20.6+) reports a 15-minute window where older builds said 10, and every
+# line carries § colour codes.
+_RE_COLOR = re.compile(r"\u00a7[0-9A-Za-z]")
+_RE_TPS = re.compile(r"TPS from last 1m,\s*5m,\s*(?:10|15)m:\s*([-\d.,\s]+)")
+_RE_MEAN_TICK = re.compile(r"Mean tick time:\s*([\d.]+)\s*ms", re.IGNORECASE)
+_RE_MEMORY = re.compile(r"Memory:\s*[\d.]+\s*\w?\s*/\s*[\d.]+\s*\w?\s*\(([\d.]+)%\)")
+
 
 @dataclass
 class ParsedLine:
@@ -49,6 +58,25 @@ def parse(line: str) -> ParsedLine:
     elif _RE_WARN.search(line):
         out.level = "warn"
     return out
+
+
+def parse_tps(text: str) -> dict | None:
+    """Extract TPS/MSPT numbers from a ``/tps`` reply. Missing fields stay None."""
+    text = _RE_COLOR.sub("", text)
+    out: dict[str, float | None] = {"tps1": None, "tps5": None, "tps10": None, "mspt": None, "mem_pct": None}
+    found = False
+    if m := _RE_TPS.search(text):
+        nums = re.findall(r"\d+(?:\.\d+)?", m.group(1))
+        if len(nums) >= 3:
+            out["tps1"], out["tps5"], out["tps10"] = (float(n) for n in nums[-3:])
+            found = True
+    if m := _RE_MEAN_TICK.search(text):
+        out["mspt"] = float(m.group(1))
+        found = True
+    if m := _RE_MEMORY.search(text):
+        out["mem_pct"] = float(m.group(1))
+        found = True
+    return out if found else None
 
 
 @dataclass

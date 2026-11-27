@@ -32,6 +32,14 @@ def start() -> None:
         replace_existing=True,
     )
     scheduler.add_job(
+        manager.sample_tps,
+        IntervalTrigger(seconds=settings.tps_interval),
+        id="tps",
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
+    scheduler.add_job(
         _prune,
         IntervalTrigger(minutes=30),
         id="prune",

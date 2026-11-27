@@ -86,7 +86,7 @@ nautilus-mc/
 │   ├── components/   # Confirm / AsyncState / ServerTable / MetricChart / StatusBadge
 │   └── pages/        # 10 个页面 + tabs/ 10 个详情页签
 ├── docs/             # architecture.md（架构）· research.md（调研 14 节）
-├── tests/            # 133 项 pytest
+├── tests/            # 135 项 pytest
 ├── scripts/          # e2e_vanilla.py（真机 E2E）· e2e_forge.py · mock_llm.py
 ├── migrations/       # Alembic
 ├── deploy/           # Dockerfile / compose / systemd / env 样例
@@ -121,6 +121,8 @@ RCON `stop` → stdin `stop` → `SIGTERM`/Windows `CTRL_BREAK` → 宽限期后
 Windows 用 `taskkill /F /T` 连带结束进程树。
 
 崩溃自动重启：指数退避 2/4/8…最多 60s，上限 10 次，手动停止不触发，健康运行 5 分钟后计数归零。
+
+TPS 采样（P6.5）：APScheduler 每 `tps_interval`（默认 10s）对**运行中且开启 RCON 的 Paper/Purpur** 服务端发 `/tps`，解析结果进 `Runtime.tps` 环形缓冲（同 `metrics` 一样只存内存、重启即清）。不用 stdin 回退——那条路径拿不到关联的响应文本。
 
 **坑 6**：Windows 上 `java.exe` 只是启动器，真正的 JVM 在子进程里。CPU/RSS 必须按
 `psutil` 进程树累加，CPU% 用累计 CPU 时间差分，不能直接读 `java.exe` 的数。
@@ -221,7 +223,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 | P6.2 | 备份调度：增量 zip + 异地上传（S3/WebDAV），保留策略 |
 | P6.3 | OIDC 单点登录（Authlib），企业用户目录对接 |
 | P6.4 | 插件市场聚合器：Modrinth + Hangar + CurseForge 统一检索与冲突检测 |
-| P6.5 | 性能剖析：JFR/Metrics 接入，TPS/MSPT 曲线（Paper 的 `/tps` 解析） |
+| P6.5 | 性能剖析：**TPS/MSPT 曲线已上线**（2026-11-27：RCON 每 10 秒采样 Paper `/tps`，REST `/servers/{id}/tps`，WS `tps_history`/`tps` 帧，监控页曲线 + Tick 健康徽章）；JFR 接入仍待做 |
 
 ### 5.3 明确"没做"的及原因
 
@@ -263,6 +265,8 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 | 19 | 工程网格放在 `body` 上会污染登录页 | 收窄到 `.shell-main` |
 | 20 | 前端 `fetch` 里 headers 展开顺序 | `...rest` 后再 `headers`，否则 Content-Type 被静默丢掉 |
 | 21 | 响应体只能读一次 | `res.json()` 后再 `res.text()` 会抛 "body used already"，掩盖真实错误 |
+| 22 | Paper 1.20.6+ 的 `/tps` 输出第三窗口是 **15m**（旧版 10m），且每行带 `§` 颜色码 | 解析先剥颜色码，正则同时接受 `10m/15m` |
+| 23 | Adoptium API 的下载链接重定向到 GitHub Release，国内基本不可用 | 优先试清华 `mirrors.tuna.tsinghua.edu.cn/Adoptium` 镜像（文件名与 API package name 一致），失败回退源站，SHA-256 仍以 API 为准 |
 
 ---
 

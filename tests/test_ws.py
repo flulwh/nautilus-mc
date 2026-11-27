@@ -53,6 +53,7 @@ def test_console_stream_sends_initial_frames():
             state = ws.receive_json()
             history = ws.receive_json()
             metrics = ws.receive_json()
+            tps = ws.receive_json()
 
         assert state["t"] == "state"
         assert state["id"] == server_id
@@ -61,6 +62,7 @@ def test_console_stream_sends_initial_frames():
         # The backfill is a distinct topic from the per-tick ``metrics`` sample;
         # merging them made the client treat the batch as a data point.
         assert metrics == {"t": "metrics_history", "points": []}
+        assert tps == {"t": "tps_history", "points": []}
 
 
 def test_console_stream_rejects_anonymous():

@@ -34,7 +34,7 @@ from ..events import bus, topic
 from ..models import Server
 from ..settings import settings
 from . import rcon as rcon_client
-from .logbus import ConsoleBuffer
+from .logbus import ConsoleBuffer, parse_tps
 
 log = logging.getLogger("nautilus.supervisor")
 
@@ -58,6 +58,7 @@ class Runtime:
     ps: psutil.Process | None = None
     console: ConsoleBuffer = field(default_factory=lambda: ConsoleBuffer(settings.max_log_lines))
     metrics: deque = field(default_factory=lambda: deque(maxlen=settings.metrics_points))
+    tps: deque = field(default_factory=lambda: deque(maxlen=settings.metrics_points))
     started_at: float | None = None
     stopped_at: float | None = None
     last_exit_code: int | None = None
@@ -305,6 +306,7 @@ class ServerManager:
                     task.cancel()
             rt.console.clear()
             rt.metrics.clear()
+            rt.tps.clear()
             self._publish_state(server.id, rt)
             log.info("starting server %s: %s", server.id, " ".join(argv))
 
@@ -633,6 +635,37 @@ class ServerManager:
             }
             rt.metrics.append(point)
             bus.publish(topic(sid, "metrics"), point)
+
+    # -------------------------------------------------------------------- tps
+    async def sample_tps(self) -> None:
+        """Poll ``/tps`` over RCON for running Paper-family servers.
+
+        Requires RCON: the stdin fallback returns before the answer is
+        produced, and correlating async console output with a command would
+        race with whatever else is typing into the console.
+        """
+        from ..db import SessionFactory
+
+        running = [(sid, rt) for sid, rt in self._rt.items() if rt.alive and rt.state == "running"]
+        if not running:
+            return
+        async with SessionFactory() as session:
+            for sid, rt in running:
+                server = await session.get(Server, sid)
+                if server is None or server.kind not in {"paper", "purpur"}:
+                    continue
+                if not server.rcon_enabled or not server.rcon_password:
+                    continue
+                try:
+                    output = await self.send(server, "tps")
+                except (ManagerError, rcon_client.RconError, OSError, asyncio.TimeoutError):
+                    continue
+                parsed = parse_tps(output) if output else None
+                if not parsed:
+                    continue
+                point = {"ts": time.time(), **parsed}
+                rt.tps.append(point)
+                bus.publish(topic(sid, "tps"), point)
 
     # --------------------------------------------------------------- shutdown
     async def shutdown(self) -> None:
