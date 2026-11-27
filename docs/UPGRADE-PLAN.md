@@ -39,6 +39,19 @@
   AI 工具 36 → 40：`broadcast_announcement`、`save_world`、`reload_server`(dangerous)、
   `set_maintenance_mode`(dangerous)。真机（Paper 1.21.4 + JDK 25，一次性 8399 面板）：
   端点逐个打 + Playwright 浏览器 10 项断言全过；测试 +5（151 全绿）。
+- [x] **Codex UI 设计源码替换主题层（用户指定，2026-11-28 完成）**：
+  从 github.com/Wangnov/awesome-codex-skins 拉取 SPEC.md 与 skins/guts-terminal、
+  asuka-eva02、kaworu-mark06 的真实 theme.json/theme.css（codeload tar.gz + zip 解包；
+  codex-styler 仓库网络截断，仅得 apps/desktop，未阻塞——令牌源以 skins 规范为准）。
+  提取的设计令牌替换进 theme.ts/styles.css：暖 ink 对 #2a2a28/#e8e5da（steelblue/slate
+  色阶原地换值）、恒定深色 screen 面 #191a1d/#212327（控制台/编辑器/tooltip，
+  xterm 与 uPlot 画布色同步）、semanticColors 三件套（teal→#46c077、red→#d64541、
+  新增 skill 琥珀 #e8a33d 用于 AI 思考/模型推理）、blue 换皮肤 cyan 收敛版、
+  暖奶油亮色方案（#f7f5f0/#f4f1ea/#f6f3ec）。组件配方落 styles.css：侧栏 inset
+  3px 边缘条+渐变洗、弹层 --pop 实底+inset 顶部高光+大柔影+遮罩 blur/saturate、
+  菜单项 hover skill 边缘条、composer 内凹屏、卡片 0 6 18 柔影。
+  真机验证：一次性 8399 面板 + Playwright 17 项断言全过（暗/亮双方案 token、
+  Menu/Modal/Tooltip 配方、导航边缘条）；151 测试全绿。
 - [ ] W1-Step2 `nautilus-agent`
 - [ ] W2 状态持久化与数据层
 - [ ] W3–W7（详见下文）

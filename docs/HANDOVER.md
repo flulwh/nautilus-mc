@@ -148,12 +148,18 @@ TPS 采样（P6.5）：APScheduler 每 `tps_interval`（默认 10s）对**运行
 React 19 + Vite 7 + Mantine 8 + TanStack Query + uPlot。
 Tab 级 lazy 分包，`motion` 单独拆 chunk（主包 443KB → 309KB）。
 
-主题：**Codex 桌面端风格**（默认暗色：#0d0d0f 底 + 分层面板 + 1px 边框；单色墨蓝
+主题：**Codex 桌面端风格**（默认暗色：#0f1012 底 + 分层面板 + 1px 边框；单色墨
 `steelblue` 色阶充当 ink 强调色，主按钮 primaryShade {light:9, dark:1} 实现黑底白字/
-白底黑字的反转观感；圆角 6-12px；语义色仅用于状态）。无桌面顶栏——品牌行、导航、
-用户菜单与主题切换全部收进 240px 侧栏，激活项用 layoutId 滑动的圆角高亮。
-终端与代码编辑器在两种配色下都保持深色 —— 它们是内容面板不是界面 chrome。
-参考：github.com/Wangnov/awesome-codex-skins、github.com/xuhuanstudio/codex-styler。
+白底黑字的反转观感；圆角 6-14px；语义色仅用于状态）。无桌面顶栏——品牌行、导航、
+用户菜单与主题切换全部收进 240px 侧栏，激活项用 layoutId 滑动的圆角高亮 + 墨色
+inset 边缘条。设计令牌直接取自 .codexskin 设计源码（SPEC.md + skins/guts-terminal、
+asuka-eva02 的 theme.json）：暖 ink 对 #2a2a28/#e8e5da、恒定深色的 screen/screen-2
+代码面（#191a1d/#212327，两种配色都不变——它们是内容面板不是界面 chrome）、
+semanticColors 三件套（diffAdded #46c077=teal、diffRemoved #d64541=red、
+skill #e8a33d=yellow/skill，AI 思考与模型推理用 skill 琥珀）、弹层配方
+（--pop 实底 + inset 顶部高光 + 大柔影 + 遮罩 blur(2px) saturate(90%)、
+tooltip 恒为小 screen 面）。参考：github.com/Wangnov/awesome-codex-skins、
+github.com/xuhuanstudio/codex-styler。
 
 ---
 

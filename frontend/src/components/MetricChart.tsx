@@ -25,8 +25,8 @@ export function MetricChart({
   const { ref: sizeRef, width } = useElementSize();
   const { colorScheme } = useMantineColorScheme();
   // Canvas can't read CSS variables, so mirror the Codex neutral tokens here.
-  const axisStroke = colorScheme === "dark" ? "#8e8e96" : "#6f6f78";
-  const gridStroke = colorScheme === "dark" ? "#27272b" : "#e5e5e8";
+  const axisStroke = colorScheme === "dark" ? "#8f8c82" : "#7a7568";
+  const gridStroke = colorScheme === "dark" ? "#2a2b31" : "#e4e0d6";
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<uPlot | null>(null);
   // Draw-in progress: the line grows from the left instead of appearing whole.

@@ -178,9 +178,9 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             <MetricChart
               timestamps={tpsTs}
               series={[
-                { label: "1 分钟", color: "#48c487", data: visibleTps.map((p) => p.tps1) },
+                { label: "1 分钟", color: "#46c077", data: visibleTps.map((p) => p.tps1) },
                 { label: "5 分钟", color: "#8a6fd6", data: visibleTps.map((p) => p.tps5) },
-                { label: "10/15 分钟", color: "#8e8e96", data: visibleTps.map((p) => p.tps10) },
+                { label: "10/15 分钟", color: "#8f8c82", data: visibleTps.map((p) => p.tps10) },
               ]}
               height={190}
             />
@@ -200,7 +200,7 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "CPU %", color: "#8e8e96", data: cpu }]} height={190} />
+            <MetricChart timestamps={ts} series={[{ label: "CPU %", color: "#8f8c82", data: cpu }]} height={190} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               等待采样数据（每 3 秒一次）
@@ -236,7 +236,7 @@ export function MetricsTab({ serverId }: { serverId: number }) {
             </Text>
           </Group>
           {ts.length > 1 ? (
-            <MetricChart timestamps={ts} series={[{ label: "Players", color: "#48c487", data: players }]} height={170} />
+            <MetricChart timestamps={ts} series={[{ label: "Players", color: "#46c077", data: players }]} height={170} />
           ) : (
             <Text size="xs" c="dimmed" py="lg">
               暂无数据

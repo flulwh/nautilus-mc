@@ -6,8 +6,10 @@ import { createTheme, rem } from "@mantine/core";
  * Neutral, chat-first, quietly rounded: an ink-on-paper monochrome identity
  * (black primary buttons in light mode, white in dark mode), semantic status
  * colours reserved for real state, soft 1px borders instead of rules, and
- * 6-12px radii throughout. Mirrors the OpenAI Codex desktop app; references:
- * github.com/Wangnov/awesome-codex-skins, github.com/xuhuanstudio/codex-styler.
+ * 6-14px radii throughout. Token values (surfaces, screen, semantic colours,
+ * radii, overlay recipe) are extracted from the .codexskin design sources:
+ * github.com/Wangnov/awesome-codex-skins (SPEC.md + guts-terminal/asuka-eva02
+ * theme.json), github.com/xuhuanstudio/codex-styler.
  */
 export const nautilusTheme = createTheme({
   primaryColor: "steelblue",
@@ -42,67 +44,98 @@ export const nautilusTheme = createTheme({
     },
   },
   colors: {
-    // The accent is ink itself: near-white on dark, near-black on light.
+    // The accent is ink itself, warmed to the source skins' ink pair:
+    // #e8e5da on dark (ink-light), #2a2a28 on light (ink).
     steelblue: [
-      "#f7f7f8",
-      "#e8e8ea",
-      "#d4d4d8",
-      "#b4b4bc",
-      "#8e8e96",
-      "#6f6f77",
-      "#55555c",
-      "#3f3f45",
-      "#28282c",
-      "#121214",
+      "#f5f4ef",
+      "#e8e5da",
+      "#d5d2c8",
+      "#b3b0a5",
+      "#8f8c82",
+      "#6e6b63",
+      "#55524b",
+      "#3f3d38",
+      "#2a2a28",
+      "#1b1b19",
     ],
-    // Cool neutral for chrome, borders and secondary text.
+    // Warm neutral for chrome, borders and secondary text.
     slate: [
-      "#f7f7f8",
-      "#ececee",
-      "#d9d9dd",
-      "#b9b9c0",
-      "#96969e",
-      "#75757d",
-      "#5c5c64",
-      "#45454c",
-      "#2e2e33",
-      "#1a1a1d",
+      "#f5f4ef",
+      "#eae8e1",
+      "#d8d5cc",
+      "#b9b6ac",
+      "#969389",
+      "#74716a",
+      "#595752",
+      "#42413d",
+      "#2b2b28",
+      "#1a1a18",
     ],
+    // diffRemoved anchor: #d64541 (dark) / #c8300e (light).
     red: [
       "#fdecea",
-      "#fbd3cf",
-      "#f6a9a1",
-      "#ee7d72",
-      "#e5534b",
-      "#c9372f",
-      "#a52a24",
-      "#83221d",
-      "#651c18",
-      "#4a1512",
+      "#fbd2ce",
+      "#f6a9a2",
+      "#ec7d74",
+      "#d64541",
+      "#c8300e",
+      "#8c2d2b",
+      "#6b2322",
+      "#4e1a19",
+      "#361211",
     ],
+    // amber / amber-deep from the skins' palette.
     yellow: [
-      "#fdf6e7",
-      "#f9e9c4",
-      "#f0d494",
-      "#e3ba5e",
-      "#d4a341",
-      "#b5852f",
-      "#93692a",
-      "#745227",
-      "#573d1f",
-      "#3d2b17",
+      "#fdf4e7",
+      "#f9e5c2",
+      "#f1cd92",
+      "#e8b96a",
+      "#e8a33d",
+      "#d97e2a",
+      "#b5651f",
+      "#8f4f19",
+      "#6a3a13",
+      "#47270d",
     ],
+    // diffAdded anchor: #46c077 (dark) / #2f9e63 (light).
     teal: [
-      "#eafaf1",
-      "#d3f4e0",
-      "#a8e8c4",
-      "#75d8a5",
-      "#48c487",
-      "#2fa871",
-      "#24865d",
-      "#1d6b4c",
-      "#17553d",
-      "#123f2e",
+      "#e9faf1",
+      "#cfeedd",
+      "#a4e5c2",
+      "#71d49e",
+      "#46c077",
+      "#2f9e63",
+      "#258252",
+      "#1e6742",
+      "#185134",
+      "#113b26",
+    ],
+    // semanticColors.skill — the amber that marks AI/model capability in Codex.
+    skill: [
+      "#fdf4e7",
+      "#f9e4c3",
+      "#f2ce91",
+      "#eabb68",
+      "#e8a33d",
+      "#d97e2a",
+      "#b5651f",
+      "#8f4f19",
+      "#6a3a13",
+      "#47270d",
+    ],
+    // "cyan" from the skins' palette, desaturated — replaces Mantine's loud
+    // default blue for connecting/plan states.
+    blue: [
+      "#edf7f9",
+      "#d7edf2",
+      "#b0dbe4",
+      "#84c3d1",
+      "#4fc3d9",
+      "#3d97a8",
+      "#307685",
+      "#255965",
+      "#1a4049",
+      "#122c33",
     ],
     // Chart line for the memory series — muted violet.
     grape: [
@@ -125,7 +158,8 @@ export const nautilusTheme = createTheme({
     ActionIcon: { defaultProps: { radius: 6, variant: "subtle" } },
     Badge: { defaultProps: { radius: 4, tt: "none", fw: 500 } },
     Progress: { defaultProps: { radius: 999 } },
-    Modal: { defaultProps: { radius: 12, centered: true, shadow: "md" } },
+    Modal: { defaultProps: { radius: 14, centered: true, shadow: "xl" } },
+    Menu: { defaultProps: { radius: 10, shadow: "xl" } },
     Table: {
       defaultProps: {
         highlightOnHover: true,

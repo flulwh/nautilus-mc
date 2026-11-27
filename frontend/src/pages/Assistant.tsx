@@ -140,7 +140,7 @@ type RunStatus = "ready" | "submitted" | "thinking" | "streaming" | "error" | "s
 const STATUS: Record<RunStatus, { label: string; color: string }> = {
   ready: { label: "就绪", color: "gray" },
   submitted: { label: "连接中", color: "blue" },
-  thinking: { label: "思考中", color: "grape" },
+  thinking: { label: "思考中", color: "skill" },
   streaming: { label: "生成中", color: "teal" },
   error: { label: "出错", color: "red" },
   stopped: { label: "已停止", color: "orange" },
@@ -157,7 +157,7 @@ function relative(idle: number): string {
 }
 
 const TRACE_STEP: Record<string, { label: string; color: string; icon: "model" | "tool" | "plan" | "approval" | "note" }> = {
-  model: { label: "模型推理", color: "grape", icon: "model" },
+  model: { label: "模型推理", color: "skill", icon: "model" },
   tool: { label: "工具", color: "teal", icon: "tool" },
   plan: { label: "任务清单", color: "blue", icon: "plan" },
   approval: { label: "等待确认", color: "orange", icon: "approval" },

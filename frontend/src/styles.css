@@ -1,46 +1,62 @@
 /* =====================================================================
    Codex desktop design layer.
 
-   Neutral surfaces, monochrome ink accent, soft 1px borders, 6-12px
-   radii. Dark is the default scheme (the app's most recognisable
-   state); light is a full alternate. Code surfaces stay dark in
-   both. References: github.com/Wangnov/awesome-codex-skins ·
-   github.com/xuhuanstudio/codex-styler
+   Token values and component recipes are ported from the .codexskin
+   design sources (github.com/Wangnov/awesome-codex-skins — SPEC.md,
+   skins/guts-terminal, skins/asuka-eva02 — and github.com/xuhuanstudio/
+   codex-styler): warm ink pair (#2a2a28 / #e8e5da), the screen/screen-2
+   code surface that stays dark in both schemes, side-bg/side-panel
+   dark chrome, the overlay recipe (solid pop surface + inset top
+   highlight + big soft shadow), inset accent edge bars on nav, and the
+   semanticColors trio (diffAdded / diffRemoved / skill).
+   Dark is the default scheme; light is a full alternate ("日间报告风").
    ===================================================================== */
 
 :root,
 [data-mantine-color-scheme="dark"] {
-  --bg: #0d0d0f;
-  --panel: #161618;
-  --panel-2: #1f1f22;
-  --line: #27272b;
-  --line-strong: #3a3a40;
-  --text: #e8e8ea;
-  --dim: #8e8e96;
-  --accent: #f2f2f3;
-  --accent-text: #f2f2f3;
-  --on-accent: #16161a;
-  --ok: #48c487;
-  --warn: #d4a341;
-  --bad: #e5534b;
+  --bg: #0f1012;            /* side-bg */
+  --panel: #16171a;         /* side-panel */
+  --panel-2: #1f2026;       /* panel-dark */
+  --line: #2a2b31;
+  --line-strong: #3f4148;
+  --text: #e8e5da;          /* ink-light */
+  --dim: #8f8a7e;           /* ink-soft, warmed */
+  --accent: #f2f0ea;
+  --accent-text: #f2f0ea;
+  --on-accent: #1b1b19;
+  --ok: #46c077;            /* semanticColors.diffAdded */
+  --warn: #e8a33d;          /* amber */
+  --bad: #d64541;           /* semanticColors.diffRemoved */
+  --skill: #e8a33d;         /* semanticColors.skill — AI/model marker */
+  --screen: #191a1d;        /* code/console surface, both schemes */
+  --screen-2: #212327;      /* console chrome */
+  --screen-ink: #e8e5da;    /* text on the screen surface, both schemes */
+  --pop: #1b1d24;           /* menus and dialogs */
+  --recess: rgba(0, 0, 0, 0.35);
   --surface-2: rgba(255, 255, 255, 0.04);
 }
 
 [data-mantine-color-scheme="light"] {
-  --bg: #ffffff;
-  --panel: #fafafb;
-  --panel-2: #f0f0f2;
-  --line: #e5e5e8;
-  --line-strong: #c9c9cf;
-  --text: #1b1b1e;
-  --dim: #6f6f78;
-  --accent: #16161a;
-  --accent-text: #16161a;
-  --on-accent: #ffffff;
-  --ok: #1f9d63;
-  --warn: #b5852f;
-  --bad: #c9372f;
-  --surface-2: rgba(0, 0, 0, 0.03);
+  --bg: #f7f5f0;            /* cream, lifted */
+  --panel: #ffffff;
+  --panel-2: #f4f1ea;       /* panel */
+  --line: #e4e0d6;          /* line, rgba(42,42,40,.16) resolved on cream */
+  --line-strong: #cbc7bb;
+  --text: #2a2a28;          /* ink */
+  --dim: #7a7568;           /* ink-soft */
+  --accent: #2a2a28;
+  --accent-text: #2a2a28;
+  --on-accent: #f7f5f0;
+  --ok: #2f9e63;
+  --warn: #d97e2a;          /* amber-deep */
+  --bad: #c8300e;
+  --skill: #d97e2a;
+  --screen: #191a1d;
+  --screen-2: #212327;
+  --screen-ink: #e8e5da;
+  --pop: #f6f3ec;
+  --recess: rgba(42, 42, 40, 0.1);
+  --surface-2: rgba(42, 42, 40, 0.04);
 }
 
 * {
@@ -111,9 +127,24 @@ body {
   color: var(--text);
 }
 
+/* Codex sidebar recipe: an inset accent edge bar grows from 2px on hover
+   to 3px on the active row (skins/guts-terminal). */
+.nav-item:hover .nav-indicator {
+  box-shadow: inset 2px 0 0 var(--accent-text);
+}
+
 .nav-item[data-active="true"] {
   color: var(--text);
   font-weight: 500;
+}
+
+.nav-item[data-active="true"] .nav-indicator {
+  box-shadow: inset 3px 0 0 var(--accent-text);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text) 12%, transparent),
+    color-mix(in srgb, var(--text) 3%, transparent) 72%
+  );
 }
 
 /* The shared layoutId indicator: a rounded highlight that slides
@@ -148,13 +179,17 @@ body {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* Message-card recipe from the skins: hairline border + wide soft drop. */
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-/* The composer bar at the bottom of the assistant card. */
+/* The composer bar at the bottom of the assistant card — the source skins
+   paint it as a recessed screen (inset shadow, no raised chrome). */
 .composer {
   border-top: 1px solid var(--line);
   background: var(--panel);
   border-radius: 0 0 8px 8px;
+  box-shadow: inset 0 2px 8px var(--recess);
 }
 
 /* 流式输出时跟在最后一个字后面的光标，不用动画库 */
@@ -317,7 +352,7 @@ body {
 }
 
 .status-dot.stopped {
-  background: #5b5f66;
+  background: #6e6b63;
 }
 
 .status-dot.crashed {
@@ -378,12 +413,13 @@ body {
 
 /* ---------------------------------------------------------------- console */
 
-/* Terminals and code are content surfaces: they stay dark in both schemes. */
+/* Terminals and code are content surfaces: they stay dark in both schemes,
+   on the skins' screen/screen-2 pair. */
 .console-wrap {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--line);
-  background: #0a0a0c;
+  background: var(--screen);
 }
 
 .console-head {
@@ -391,7 +427,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: #101013;
+  background: var(--screen-2);
   border-bottom: 1px solid var(--line);
   font-size: 11.5px;
   color: var(--dim);
@@ -405,7 +441,7 @@ body {
 
 .console-input {
   border-top: 1px solid var(--line);
-  background: #0c0c0e;
+  background: var(--screen-2);
 }
 
 .log-line {
@@ -415,11 +451,58 @@ body {
 }
 
 .log-line.warn {
-  color: #d9b568;
+  color: #e8b96a;
 }
 
 .log-line.error {
-  color: #d98178;
+  color: #ec7d74;
+}
+
+/* ---------------------------------------------------------------- overlays */
+
+/* Skins' overlay recipe: a solid pop surface, hairline border, inset top
+   highlight and one big diffuse drop; hovered menu items carry the skill
+   colour as an inset edge bar. */
+.mantine-Menu-dropdown,
+.mantine-Popover-dropdown,
+.mantine-Select-dropdown {
+  background: var(--pop);
+  border: 1px solid var(--line);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+/* Mantine 8 sets data-hovered only for keyboard navigation; mouse hover
+   is plain :hover — the recipe must cover both. */
+.mantine-Menu-item:hover,
+.mantine-Menu-item[data-hovered="true"] {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--skill) 16%, transparent),
+    transparent 78%
+  );
+  box-shadow: inset 2px 0 0 var(--skill);
+}
+
+.mantine-Modal-content {
+  background: var(--pop);
+  border: 1px solid var(--line);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.42);
+}
+
+.mantine-Modal-overlay {
+  background: color-mix(in srgb, var(--bg) 55%, transparent) !important;
+  backdrop-filter: blur(2px) saturate(90%);
+}
+
+/* Tooltips are tiny screens: dark in both schemes, skill-tinted hairline.
+   (Mantine 8's Tooltip floating layer is .mantine-Tooltip-tooltip.) */
+.mantine-Tooltip-tooltip {
+  background: var(--screen-2);
+  border: 1px solid color-mix(in srgb, var(--skill) 30%, transparent);
+  color: var(--screen-ink);
+  border-radius: 6px;
 }
 
 /* ------------------------------------------------------------------ misc */
@@ -429,8 +512,8 @@ body {
   min-height: 420px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: #0a0a0c;
-  color: #c8cad0;
+  background: var(--screen);
+  color: var(--screen-ink);
   padding: 12px 14px;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 12.5px;
