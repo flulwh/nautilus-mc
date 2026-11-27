@@ -60,6 +60,7 @@
 | 事件总线 | `events.py` | 进程内 pub/sub + WS 广播 + 背压 | `bus.publish(topic, data)` |
 | 扩展点 | `extensions.py` | `nautilus.extensions` entry points + 内置 hook | `hooks.emit("server.started", ctx)` |
 | 进程监管 | `servers/manager.py` | 状态机、启停、重启退避、优雅停机阶梯 | `manager.start(id)` |
+| 运维动作 | `servers/ops.py` | 精选动作 save/reload/broadcast/维护模式；HTTP 与 AI 工具共用，在线态绝不写 `server.properties` | `ops.set_maintenance(server, on)` |
 | RCON | `servers/rcon.py` | 纯 asyncio RCON 协议实现 | `await rcon.command("list")` |
 | 日志 | `servers/logbus.py` | stdout + 文件双通道、环形缓冲、事件解析 | `logbus.subscribe(id)` |
 | 指标 | `servers/metrics.py` | psutil 采样、历史环形队列 | `metrics.history(id)` |
@@ -76,7 +77,7 @@
 | 审计 | `audit.py` | 所有写操作的不可变记录 | `audit.record(...)` |
 | 地址配置 | `addresses.py` | 面板对外地址（Host 推断兜底）、MCP 传输模式/监听地址，存 `settings_kv` | `load/save/public` |
 | AI 配置 | `ai/config.py` | 端点/模型/密钥配置，Fernet 加密后存 `settings_kv` | `load/save` |
-| AI 工具 | `ai/tools.py` | 把面板能力封装为 36 个工具：Casbin 权限、危险标记、超时、统一返回、写审计；不依赖 agent 框架 / FastAPI | `TOOLS / catalogue()` |
+| AI 工具 | `ai/tools.py` | 把面板能力封装为 40 个工具：Casbin 权限、危险标记、超时、统一返回、写审计；不依赖 agent 框架 / FastAPI | `TOOLS / catalogue()` |
 | AI agent | `ai/agent.py` | LangGraph react 图（agent ⇄ tools）、SSE 事件映射、审批续跑、取消、工具超时、运行时指令、自动压缩、失败保留消息 | `stream_turn() / build_graph() / runtime_instructions()` |
 | 模型发现 | `ai/discovery.py` | `/v1/models` 拿名单，本地端点再读 `/api/tags` 补体积/参数量/量化；合并去重、限响应体、失败给可操作提示 | `discover()` |
 | AI 会话 | `ai/session.py` | 进程内多轮历史 + 标题/摘要元数据，按用户提问裁剪 + TTL/LRU；历史可序列化回前端 | `conversations / serialize()` |
@@ -211,6 +212,9 @@ api_tokens(id, user_id, name, prefix, token_hash, created_at, last_used_at, expi
 | GET/POST | `/api/servers` | `server:read` / `server:create` |
 | POST | `/api/servers/{id}/start\|stop\|restart\|kill` | `server:control` |
 | POST | `/api/servers/{id}/command` | `server:console` |
+| POST | `/api/servers/{id}/actions/{save\|reload}` | `server:console`（审计 server.save/reload） |
+| POST | `/api/servers/{id}/actions/broadcast` | `server:console`（say，换行压平） |
+| POST | `/api/servers/{id}/actions/maintenance` | `server:console`（白名单准入 + 踢出非白名单，OP 豁免） |
 | GET | `/api/servers/{id}/files?path=` | `server:files` |
 | PUT | `/api/servers/{id}/files/content` | `server:files` |
 | GET/PUT | `/api/servers/{id}/config/{path}` | `server:config` |

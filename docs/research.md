@@ -240,7 +240,7 @@ curl -s "https://api.modrinth.com/v2/search?limit=1" -H "User-Agent: nautilus/0.
 
 **取舍**：没有引入 LangGraph / OpenAI Agents SDK —— 它们会替换掉现有的 pydantic-ai
 工具层与 Casbin 权限包装，收益不足以抵消重写风险；本项目只取可独立落地的模式。
-也没有启用工具搜索（ToolSearch）：36 个工具尚在可控范围，且国内 OpenAI 兼容端点对
+也没有启用工具搜索（ToolSearch）：40 个工具尚在可控范围，且国内 OpenAI 兼容端点对
 provider 原生工具发现支持不一致，本地策略反而会引入额外往返。
 
 > **2026-11-28 更新**：按升级要求，agent 循环已迁移到 LangGraph（react 图，
@@ -267,7 +267,7 @@ provider 原生工具发现支持不一致，本地策略反而会引入额外�
 
 **取舍**：没有引入 LangGraph / OpenAI Agents SDK —— 它们会替换掉现有的 pydantic-ai
 工具层与 Casbin 权限包装，收益不足以抵消重写风险；本项目只取可独立落地的模式。
-也没有启用工具搜索（ToolSearch）：36 个工具尚在可控范围，且国内 OpenAI 兼容端点对
+也没有启用工具搜索（ToolSearch）：40 个工具尚在可控范围，且国内 OpenAI 兼容端点对
 provider 原生工具发现支持不一致，本地策略反而会引入额外往返。
 
 > **2026-11-28 更新**：按升级要求，agent 循环已迁移到 LangGraph（react 图，

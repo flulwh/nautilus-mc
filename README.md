@@ -153,7 +153,7 @@ Forge / NeoForge 的安装流程与 [`itzg/mc-image-helper`](https://github.com/
 
 ### 12. AI 助手
 用自然语言操纵面板：启停服务器、发控制台命令、读写文件与配置、装插件、做备份、切世界、管玩家，
-共 **36 个工具**，覆盖上面所有能力。
+共 **40 个工具**，覆盖上面所有能力。
 
 - **接哪家模型**：任何 OpenAI 兼容端点（DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI / 本地 Ollama），
   在「系统设置 -> AI 助手」填 `base_url` + `model` + `api_key` 即可，带「测试连接」按钮。
@@ -481,7 +481,7 @@ E2E 会真的下载 47MB 服务端 jar、真的拉起 JVM，输出 `E2E OK` 才�
 | 扩展机制 | `pluggy` | pytest 同款，语义稳定 |
 | 前端 | React + Mantine + xterm + uPlot | 控制台与曲线是最吃性能的两块，直接用成熟组件 |
 | AI agent | `langgraph` 1.2 + `langchain-openai` 1.8 | react 状态图（agent ⇄ tools）、messages/updates 双流式；人工审批不依赖 checkpointer，待确认集合独立存储、确认后重新入图续跑 |
-| 多步任务与手册 | Claude Code TodoWrite + Claude Agent SDK Skills | 清单显式化进度；手册只在需要时加载，避免把 36 个工具的细节全塞进 system prompt |
+| 多步任务与手册 | Claude Code TodoWrite + Claude Agent SDK Skills | 清单显式化进度；手册只在需要时加载，避免把 40 个工具的细节全塞进 system prompt |
 | 多会话与命名 | Claude Code `--resume` / `/rename` | 会话像分支：不同任务分开，标题可改，切换时回放历史 |
 | 上下文压缩 | Claude Code `/compact <focus>` + LangGraph 摘要式记忆 | 先摘要旧轮次再裁剪，切点必须落在用户提问上；模型摘要失败有确定性兜底 |
 | 提示词与反馈 | LangGraph 动态 instructions + Vercel AI SDK 的 status 状态机 | 静态指令保持稳定前缀、运行时注入时间/角色；前端区分连接中/生成中/出错，工具调用有阶段和耗时 |

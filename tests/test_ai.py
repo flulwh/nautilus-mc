@@ -984,7 +984,12 @@ async def test_run_trace_endpoints_and_isolation(admin, client, monkeypatch):
     tool_step = next(s for s in run["steps"] if s["kind"] == "tool")
     assert tool_step["name"] == "list_servers"
     assert tool_step["status"] == "done" and isinstance(tool_step["duration_ms"], int)
-    assert '"ok": true' in tool_step["result"]
+    # 轨迹里的 result 按 2000 字符裁剪，未截断时优先按 JSON 断言。
+    result = tool_step["result"]
+    if len(result) < 2000:
+        assert json.loads(result).get("ok") is True
+    else:
+        assert '"ok": true' in result
 
     # 换个账号不能读别人的轨迹。
     created = await admin.post(

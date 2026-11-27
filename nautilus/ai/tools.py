@@ -35,9 +35,10 @@ from ..resources import players as player_service
 from ..resources import plugins as plugin_service
 from ..resources import worlds as world_service
 from ..servers import java as java_service
+from ..servers import ops
 from ..servers import provision
 from ..servers import tasks as task_service
-from ..servers.manager import manager
+from ..servers.manager import ManagerError, manager
 from ..settings import settings
 from . import plan as plan_service
 from . import playbooks
@@ -341,6 +342,58 @@ async def send_console(server_id: int, command: str) -> dict[str, Any]:
             raise ToolError("服务器没在运行，控制台命令发不进去")
         output = await manager.send(row, command)
     return {"command": command, "output": _clip(output or "(无输出)", 4000)}
+
+
+@tool(perm=("server", "console"), mutates=True)
+async def broadcast_announcement(server_id: int, message: str) -> dict[str, Any]:
+    """向所有在线玩家广播一条公告（say）。换行会被压成空格，一次只发一条。"""
+    async with session_scope() as s:
+        row = await _server(s, server_id)
+        try:
+            clean, output = await ops.broadcast(row, message)
+        except (ManagerError, ValueError) as exc:
+            raise ToolError(str(exc)) from exc
+    return {"message": clean, "output": _clip(output or "(无输出)", 1000)}
+
+
+@tool(perm=("server", "console"), mutates=True)
+async def save_world(server_id: int) -> dict[str, Any]:
+    """让服务端立刻把世界写盘（save-all）。批量改方块、重启前、备份前用。"""
+    async with session_scope() as s:
+        row = await _server(s, server_id)
+        try:
+            output = await ops.save(row)
+        except ManagerError as exc:
+            raise ToolError(str(exc)) from exc
+    return {"saved": True, "output": _clip(output or "(无输出)", 1000)}
+
+
+@tool(perm=("server", "console"), dangerous=True, mutates=True)
+async def reload_server(server_id: int) -> dict[str, Any]:
+    """热重载部分插件/配置（reload）。很多插件不吃 reload，容易留下脏状态——能用重启就别用这个。"""
+    async with session_scope() as s:
+        row = await _server(s, server_id)
+        try:
+            output = await ops.reload(row)
+        except ManagerError as exc:
+            raise ToolError(str(exc)) from exc
+    return {"reloaded": True, "output": _clip(output or "(无输出)", 2000)}
+
+
+@tool(perm=("server", "console"), dangerous=True, mutates=True)
+async def set_maintenance_mode(server_id: int, enabled: bool, kick_outsiders: bool = True) -> dict[str, Any]:
+    """开/关维护模式。开：save-all + 白名单准入（重启后仍生效）+ 踢出不在白名单也非 OP 的在线玩家；关：解除准入限制。开启会打断玩家游戏，所以是危险操作。"""
+    async with session_scope() as s:
+        row = await _server(s, server_id)
+        try:
+            result = await ops.set_maintenance(row, bool(enabled), kick_outsiders=bool(kick_outsiders))
+        except ManagerError as exc:
+            raise ToolError(str(exc)) from exc
+    return {
+        "enabled": result["enabled"],
+        "kicked": result["kicked"],
+        "note": "白名单为空时开启维护会把所有玩家踢下线",
+    }
 
 
 @tool(perm=("server", "read"))

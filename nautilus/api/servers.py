@@ -19,6 +19,7 @@ from ..events import bus, topic
 from ..models import Server, User
 from ..resources import files as file_service
 from ..resources.plugins import content_dir
+from ..servers import ops
 from ..servers import provision
 from ..servers import jfr as jfr_service
 from ..servers.manager import ManagerError, free_port, manager, port_in_use
@@ -396,6 +397,96 @@ async def send_command(
         ip=client_ip(request),
     )
     return {"output": output}
+
+
+# ------------------------------------------------------------- operations actions
+
+
+class BroadcastIn(BaseModel):
+    message: str = Field(min_length=1, max_length=240)
+
+
+class MaintenanceIn(BaseModel):
+    enabled: bool
+    #: 开启维护时立刻踢出不在白名单的在线玩家（OP 豁免）。
+    kick_outsiders: bool = True
+    reason: str = Field(default="服务器维护中，请稍后重新加入", max_length=100)
+
+
+@router.post("/{server_id}/actions/save")
+async def action_save(
+    server_id: int,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("server", "console")),
+) -> dict:
+    server = await _get(session, server_id)
+    try:
+        output = await ops.save(server)
+    except ManagerError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await record(session, action="server.save", actor=actor, target=server.name, ip=client_ip(request))
+    return {"ok": True, "output": output[:500]}
+
+
+@router.post("/{server_id}/actions/reload")
+async def action_reload(
+    server_id: int,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("server", "console")),
+) -> dict:
+    server = await _get(session, server_id)
+    try:
+        output = await ops.reload(server)
+    except ManagerError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await record(session, action="server.reload", actor=actor, target=server.name, ip=client_ip(request))
+    return {"ok": True, "output": output[:500]}
+
+
+@router.post("/{server_id}/actions/broadcast")
+async def action_broadcast(
+    server_id: int,
+    payload: BroadcastIn,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("server", "console")),
+) -> dict:
+    server = await _get(session, server_id)
+    try:
+        message, output = await ops.broadcast(server, payload.message)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except ManagerError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await record(
+        session, action="server.broadcast", actor=actor, target=server.name,
+        detail={"message": message[:200]}, ip=client_ip(request),
+    )
+    return {"ok": True, "message": message, "output": output[:500]}
+
+
+@router.post("/{server_id}/actions/maintenance")
+async def action_maintenance(
+    server_id: int,
+    payload: MaintenanceIn,
+    request: Request,
+    session: SessionDep,
+    actor: User = Depends(require("server", "console")),
+) -> dict:
+    server = await _get(session, server_id)
+    try:
+        result = await ops.set_maintenance(
+            server, payload.enabled, kick_outsiders=payload.kick_outsiders, reason=payload.reason
+        )
+    except ManagerError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await record(
+        session, action="server.maintenance", actor=actor, target=server.name,
+        detail={"enabled": result["enabled"], "kicked": result["kicked"]}, ip=client_ip(request),
+    )
+    return {"ok": True, **result}
 
 
 # ----------------------------------------------------------------- observability

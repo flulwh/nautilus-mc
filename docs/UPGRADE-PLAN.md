@@ -29,6 +29,16 @@
   `ai/model.py` ReasoningChatOpenAI 补回 langchain-openai 丢弃的 `reasoning_content` 思考流。
   SSE 事件合同、HTTP 端点、前端零改动；测试 fake 换成 ScriptedModel（BaseChatModel 替身），
   新增 tool schema / max_steps 上限用例；146 全绿。
+- [x] **服务管理动作扩展 + AI 工具扩容（用户指定，2026-11-28 完成）**：
+  新增 Domain 模块 `servers/ops.py`（save / reload / broadcast / set_maintenance，HTTP 与 AI 共用一条路径）。
+  REST：`POST /servers/{id}/actions/{save|reload|broadcast|maintenance}`（server:console，全落审计；
+  broadcast 压平换行防指令走私；maintenance 依赖 `/whitelist on|off` 由 JVM 自己持久化
+  server.properties —— 面板在线写该文件会撞 Windows 文件锁，真机复现过 500）。
+  前端：ServerDetail 头部「更多操作」Menu（保存世界/广播公告 Modal/重载配置/维护模式开关，
+  危险项走 Confirm，维护中状态用 Badge，接管模式下走 RCON 失败有明确报错）。
+  AI 工具 36 → 40：`broadcast_announcement`、`save_world`、`reload_server`(dangerous)、
+  `set_maintenance_mode`(dangerous)。真机（Paper 1.21.4 + JDK 25，一次性 8399 面板）：
+  端点逐个打 + Playwright 浏览器 10 项断言全过；测试 +5（151 全绿）。
 - [ ] W1-Step2 `nautilus-agent`
 - [ ] W2 状态持久化与数据层
 - [ ] W3–W7（详见下文）

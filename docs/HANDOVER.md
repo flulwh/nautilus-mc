@@ -63,7 +63,7 @@ nautilus-mc/
 │   ├── ai/           # AI 能力实现，与 HTTP 解耦
 │   │   ├── agent.py     # LangGraph react 图（agent ⇄ tools）+ SSE 事件流
 │   │   ├── model.py     # ReasoningChatOpenAI：解析 reasoning_content 思考增量
-│   │   ├── tools.py     # 36 个面板能力工具（唯一改动面板状态的入口）
+│   │   ├── tools.py     # 40 个面板能力工具（唯一改动面板状态的入口）
 │   │   ├── trace.py     # 运行轨迹：逐步骤 + 真实耗时（进程内，TTL/LRU）
 │   │   ├── approvals.py # 危险操作人工确认，续跑复用同一 run_id
 │   │   ├── compaction.py # 上下文压缩
@@ -72,6 +72,7 @@ nautilus-mc/
 │   │   ├── discovery.py # Ollama / OpenAI 兼容模型发现
 │   │   ├── plan.py playbooks.py config.py
 │   ├── servers/      # 进程监管：subprocess + psutil 进程树 + RCON + cron
+│   │   └── ops.py       # 精选运维动作（save/reload/broadcast/维护模式），HTTP 与 AI 共用
 │   ├── resources/    # 配置文件读写、文件沙箱、插件市场、备份归档、玩家名单
 │   ├── auth/         # fastapi-users 集成
 │   ├── authz.py      # Casbin 封装（4 角色 × 13 动作）
@@ -96,7 +97,7 @@ nautilus-mc/
 ```
 
 **规模**：后端 Python 约 11400 行（其中 `ai/` + `api/` 两块约 5200 行），
-前端 TS/TSX 约 8550 行，AI 工具 36 个。
+前端 TS/TSX 约 8550 行，AI 工具 40 个。
 
 ---
 
@@ -135,7 +136,7 @@ TPS 采样（P6.5）：APScheduler 每 `tps_interval`（默认 10s）对**运行
 
 - **一条事件流**：thinking / text / tool_call / tool_result / approval / error / done，
   每条带 `run_id` + `seq` + `ts`。
-- **工具即权限**：`ai/tools.py` 里 36 个工具都过 `_require(obj, act)`，
+- **工具即权限**：`ai/tools.py` 里 40 个工具都过 `_require(obj, act)`，
   走的是和 HTTP 路由同一套 Casbin 检查。AI 不能做用户做不到的事。
 - **危险操作要人确认**：`auto_approve=false` 时写操作挂起等确认，续跑复用同一个 `run_id`。
 - **执行轨迹**：`ai/trace.py` 进程内保存每一步，`time.perf_counter()` 实测耗时，
@@ -279,6 +280,7 @@ npm run build              成功，motion 独立 chunk 133KB / gzip 44KB
 | 24 | `jcmd JFR.dump` 在没有进行中录制时**退出码 0** 且不写任何文件（"No recordings to dump from"） | 快照前必须先 `JFR.check` 确认有 running 录制并把 `name=` 传给它，否则接口会"成功"地返回一个不存在的文件 |
 | 25 | `JFR.check` 输出格式跨 JDK 版本不同（21：`Recording 1: name=x duration=30s (running)`；旧版 `name: (running)`），且 `jcmd` 只随 JDK 发布 | 解析正则兼容两种形态；面板托管运行时从 JRE 改为下载 JDK（旧 JRE 目录自动重建） |
 | 26 | 面板崩溃/重启后孤儿 JVM 的 stdout 管道已断，写会 EPIPE | Java `System.out` 是 `PrintStream`，吞掉 broken pipe 不崩（真机 kill -9 验证），所以接管模式改尾随 `logs/latest.log` 而非重连管道；PID 会被内核复用，认领必须比对 `psutil.create_time()`，只存 pid 会认错进程 |
+| 27 | 服务器运行时面板原子写 `server.properties` 报 `PermissionError [WinError 5]` | 运行中的 JVM 持有该文件；且 Paper 的 `/whitelist on|off` **自己会把它持久化进 server.properties**。在线改属性只发 RCON 指令，绝不在面板侧写文件 |
 
 ---
 

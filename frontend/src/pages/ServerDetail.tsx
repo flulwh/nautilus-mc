@@ -36,6 +36,7 @@ import { useParams } from "react-router-dom";
 
 import { api, ApiError } from "../api";
 import { Skeleton } from "../components/AsyncState";
+import { ServerActionsMenu } from "../components/ServerActions";
 import { StatusBadge } from "../components/StatusBadge";
 import { EASE } from "../motion";
 import { hasPerm } from "../perm";
@@ -265,6 +266,7 @@ export function ServerDetail() {
                 </Button>
               </>
             )}
+            {can("console") && running && <ServerActionsMenu serverId={serverId} />}
           </Group>
         </Group>
       </Card>
